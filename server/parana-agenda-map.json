@@ -1,0 +1,201 @@
+{
+  "hash": "7fbd372de919c4a6f005c71c917cc7799e82113c70f0d891c6827ffc4a5a81af",
+  "groups": [
+    {
+      "topic": "Língua Portuguesa",
+      "items": {
+        "1": "cfb47b98a367ecb6dacc541df7845bdde04f6518eaef644bfdfd7c9f97b027cf",
+        "2": "cf970ecf5348499aa7ce688967f16559bcfca808e6f8fdc06182f7b0151e17a2",
+        "3": "61c703f1a5fa5d99a42d5470184acc7b421a66829de0c2611c1942808c83646b",
+        "4": "34c94776eb01141c38fd5d46e2eb9615a95b9784fbb953e7053a92d0201d5d49"
+      }
+    },
+    {
+      "topic": "Direito Aplicado",
+      "items": {
+        "5": "e4f622f0aff9c6a9f995e3c0f667d4f17be77efb1fc1941a3f26dfa5083c0893",
+        "6": "2dde11162b6ed29f03e5719e62d9ece992a24eb10a09912e086f805ae9580d27",
+        "7": "0ac80f5dfa04c14d5ad8ecefde97b16904560e14fe5241ccea0da63917f33351",
+        "8": "013be4cb50a650a1524c8b6d3df2ec96e89b77e2d88b15d2f6d306626048ee47",
+        "9": "7d3bb77aa16548c998d991e9acc7370a48293b30a4e419918f8ac5d4928caf3d",
+        "10": "0e367902423a2c7b27209bc8ce691fd08e94a3ceccc1e3ab3de692acb3cebdb6",
+        "11": "f87a6e47ffe20f963c3ab0a1209e55ae69b89cbe2e70d9a8069ca4de6c88e138",
+        "12": "20f2e00bec86d21643ea6db6fe3e57052f98a1c7b01b1ca74be63682a50ef449",
+        "13": "bb8c3ad1de2cadca5287bee06da2fd0372748b90b8bb3824522d7cbbfbd50952"
+      }
+    },
+    {
+      "topic": "Raciocínio Lógico e Científico",
+      "items": {
+        "14": "a2bdb223dcb0b17b448135d6df236740a9f63ece217ccaee9987ea2a4f435e32",
+        "15": "b7749125cb29282222fcddb210121d40c1af15a8109d234a771073b995f31eff",
+        "16": "6059ebc7cac89be3fc40ee11095c086b959667e313cf7210632975adc25bbbd4",
+        "17": "6f1c40bd4a8ea2c114520245aab2c6a579a71a9e8b3df08cd281592647a0ee68",
+        "18": "ab737454ab58cbe34c02d17589861a5d5d9969d47eba1b5d000f00f92172b917"
+      }
+    },
+    {
+      "topic": "Informática",
+      "items": {
+        "19": "cca5551a7194001fa031380499231ccb3b3405cbb6ba72ac483f3ccaaeb3591f",
+        "20": "82bb1d2c1c0b66e5f378166c3d574b53eb49d196dc13dad848cb334ec6777eb3",
+        "21": "d680c2116760a1d2e3e6b644621f0ec96d082b5494127e40106fbacf31b2e1ea",
+        "22": "ec86fab79393c5048bb432727db8fef3d63d3dd70e69d45410fd7d4f2e05623d",
+        "23": "7c5c64142626df354a733e647a6daf7cb0f880e1b37cd0770b8abeab05dcacd3"
+      }
+    },
+    {
+      "topic": "Legislação Especial",
+      "items": {
+        "24": "cba3dbb6005f52eb591a66c3b3bf3dff03f00da63437ca19c79b55d289dbbb45",
+        "25": "d5f7e6a8d6af92bd634114d62d21abd848fa1c5f8b358ae9eeaf625ac869e28a",
+        "26": "803e05c5dec13ee9bbb9a581ff336e99ecf3dc7dd1db9aee501d6444d6fee4f2",
+        "27": "3a8b50a9d367587490267c20872ce6595695d5a9294d3111c7c63c994eed0d4f",
+        "28": "57703995deff56ba19eaff41d4e51c5de9aac05c655efb06885cb50fda049a80",
+        "29": "ed4f9ec8b850849cb9dc6264679370e5ac125a55fb39b3cadfa1e6bcd262bb4c",
+        "30": "9519687d365b3a646decea204a79e132917b3fdfb98150717ad63d3b4eebaec5",
+        "31": "ba731c63afdcf8b0bdd29c602081d6172713c9045ca244b5f32d1ac8d5a91de6",
+        "32": "caa1d764d56e743a5d74c25786d98deba3582d02f315a099aca910fef22cfae2",
+        "33": "41745a58c96b498bfddbbe0feb9e969f9b8434bd7499a993e01fb8a7b508d099",
+        "34": "ada8d071e961d5ce3cd9be0ca535dc5d621924d11a4ec86ddb43da3ae07623f9",
+        "35": "aace425da43af15fbdd8d3c677fa930b9153367a705fa19d3cf12a70b3104214"
+      }
+    },
+    {
+      "topic": "Noções de Criminalística e Medicina Legal",
+      "items": {
+        "36": "b51573f15b0a3c7018c27484a4e9718c2775488e3b0256d5343c193a7a8d6491",
+        "37": "59c99ca66adf3c72b8ec35a8d6bcd4d0962aeadb46fe35103b92bb3617ff6404",
+        "38": "7544cc196e7b2d8c7c25896ec3adb4383afd31b6fbe45bcdc62f19bab82337d6",
+        "39": "f31a5b38ee923fab0d94b476bea495731201b2cc793070a05b93a95886fb7b72",
+        "40": "7c6497286ec4d00fc598244aca12b7d99f29f17ad9c1a6684b7192dab0aaf837"
+      }
+    },
+    {
+      "topic": "Cadeia de Custódia do Vestígio Cibernético",
+      "items": {
+        "41": "407df8a89a9c5be3684755881b72b9841fa8b4809e1beecc088db6305e60cec3",
+        "42": "5da7e2d0a315b2a40f1017ef1ed64d8959697cefd4a33c87e944d0ba2a53a489"
+      }
+    },
+    {
+      "topic": "Exames em Mídias de Armazenamento",
+      "items": {
+        "43": "aa64ef979627fa4994967e648cda251bae8f89c1aace4f7edcd99177f0f2bdbf",
+        "44": "8d8c0019d254ba915ce6ce5941c3108b36964cea2251f30786b2f895b8803a0a"
+      }
+    },
+    {
+      "topic": "Exames em Locais de Internet",
+      "items": {
+        "45": "d8c9a1fbbf7e6a1314c46abc8f0573aa57ef5557203a923fabc7147e81d25325",
+        "46": "9db64cfa3aaf1a12504d777f49f968d2f35bb74112d33113456be92dd95a343a"
+      }
+    },
+    {
+      "topic": "Exames em Redes de Computadores e Dados de Interceptação Telemática",
+      "items": {
+        "49": "93f59ee91673a5f4eca685b2b7f609b6551f54439e44f9bf2f68bf66071bc815",
+        "54": "f1438866912f78c35ea151551d1869dea1ea109d7869b9655ab9b6439f1313d5"
+      }
+    },
+    {
+      "topic": "Exame de Sistemas Operacionais",
+      "items": {
+        "50": "14a79e716c52b94fffd4c66e4ef0f7b7bb9b4e8ee04740ce7f15ccbd7f5198a3",
+        "51": "70e0b3e5aaea6bf3506622182dda31420311e1206537b4e99f9e52b316bd7981"
+      }
+    },
+    {
+      "topic": "Exames em Imagens Digitais",
+      "items": {
+        "52": "7209d7c38b0d2dbed5d66f762d933c517f3f059a37a1604435337155945a80c8",
+        "53": "e35b557211e1803afc377601c9be83dec0043f273e4fe0d50b5622d8609ee4a3"
+      }
+    },
+    {
+      "topic": "Exames em Computação Embarcada",
+      "items": {
+        "55": "84175b9d9dc3253722b802c17b8f4f130fdf397ca2f7e13f7f23959da9e5ed90"
+      }
+    },
+    {
+      "topic": "Exames em Equipamentos Portáteis e Telefonia Móvel.",
+      "items": {
+        "56": "afda94670e5ee8c716bb86f2f340cd3bcae7cc7b1ca440a0a803fa5631d9b910",
+        "57": "8eb95a07dc56de91d37e4dcf023c8a2ae1395afab5a22cf8bc1c39f871b48775",
+        "58": "48cb01618dc7df5ba5770c4d9473075d46252319a607a3fd2de8d3ba87321f3c"
+      }
+    },
+    {
+      "topic": "Exames em Computação na Nuvem.",
+      "items": {
+        "59": "f600df4bfb54e84a678e5e3b2e64ad23c05821c7f3360b23ec00db7e82df0bee",
+        "60": "afc1ed8c28903760875356821e5a6dd5e7267d4b9405ec497eab516375a567d9"
+      }
+    },
+    {
+      "topic": "Exames em Dados Criptografados.",
+      "items": {
+        "61": "0d93674c8f245c2ca21bac312ffc4cec049987dd2d10b83ecc0032f157a0f30a",
+        "62": "92596c2f7663f1b4bf09309344f8c1de2e2ad095c1205237607d3f6a3bf6cb01"
+      }
+    },
+    {
+      "topic": "Exames em Malwares.",
+      "items": {
+        "63": "70d18195937f05af7e9458d5c7b69da4b464bf7a5b326b9c5f1815d29d8afd0c"
+      }
+    },
+    {
+      "topic": "Exame em Tecnologias de Virtualização de Plataformas",
+      "items": {
+        "65": "24786e4fdfb2ac8565a29adec105b91126c058ebf068bd3637bbdbffa61fb70e",
+        "66": "95096b421ee6a7ad12aaadebb1610b89ace312a753e9349544335c2a07ee2ff9"
+      }
+    },
+    {
+      "topic": "Exame em Bancos de Dados",
+      "items": {
+        "67": "a53509fe521abd37e514653c6aa4734286f8b445d831d68169eed206605bceee",
+        "68": "da29cabc3aaca8a4e115d246ac100575cbd46d31b4a9bbcca8b07fc08e319a23"
+      }
+    },
+    {
+      "topic": "Exame de Sistemas de Arquivos",
+      "items": {
+        "69": "5cca57e8b84a0af7c02f0e9b196112ab0285d38b01855f6e2eb3c8e0cde19de5",
+        "70": "9a6ec005d026332dfd3796dd0be9bf77dc970422a1fb2eea60d98756ba14c5c6"
+      }
+    },
+    {
+      "topic": "Exames Relacionados à Pornografia Infanto-Juvenil",
+      "items": {
+        "71": "e6ceaa9e88c40bac7e821680cf3fe4818a1d917e331c42dbdf2570d401542a73",
+        "72": "176ed6ebff5e4a620deb0bbef5ea2e5db05c9df99c12581860f1da38de84ad4d"
+      }
+    },
+    {
+      "topic": "Exames em Criptoativos e Contratos Inteligentes",
+      "items": {
+        "73": "972e4891072dd8ec4a02a5ca17ad5675f1d5980559eb555886d391097bc87af6",
+        "74": "29c6bb665589f307c49a5f4cfd620e15d9bcb20466e62f23fff05ed30d06c576"
+      }
+    },
+    {
+      "topic": "Técnicas Antiforenses",
+      "items": {
+        "76": "53ccc8bb612c941e570d43e50df1d3286fa0d69c3f3e6f57e69e8c6cd7f861ad",
+        "77": "b4aecea92c1a79369d43a23db43d33cc4c86bc8dea169ac9e3889c87836ad164"
+      }
+    },
+    {
+      "topic": "Legislação Aplicada à Computação Forense",
+      "items": {
+        "78": "00119095a3f9b49c2296208ab20ea9f2c9efb8d4303671bac3932dc9e2565ab7",
+        "79": "9440ef8a8877bc4472f57bfbdefa9f1084fc002b2906bb816c77bcecb0eca084",
+        "80": "d181f4a7fa1c72b4238e6475e3205a49a93c52fc363ba30e88ed34e76373bace"
+      }
+    }
+  ]
+}

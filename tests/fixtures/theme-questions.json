@@ -1,0 +1,64 @@
+[
+  {
+    "page": 3,
+    "number": 1,
+    "version": "A",
+    "block": "basico",
+    "prompt": "Assinale a alternativa que preencha correta e respectivamente as lacunas.",
+    "context": "",
+    "options": [
+      {
+        "key": "A",
+        "text": "I. por quê / II. reinvindicar / III. pleitea."
+      },
+      {
+        "key": "B",
+        "text": "I. por qu ê / II. reivindicar / III. pleiteia."
+      },
+      {
+        "key": "C",
+        "text": "I. por que / II. reinvindicar / III. pleiteia."
+      },
+      {
+        "key": "D",
+        "text": "I. por que / II. reivindicar / III. pleitea."
+      },
+      {
+        "key": "E",
+        "text": "I. por que / II. reivindicar / III. pleiteia."
+      }
+    ],
+    "type": "choice"
+  },
+  {
+    "page": 3,
+    "number": 4,
+    "version": "A",
+    "block": "basico",
+    "prompt": "Em colocações pronominais, a posição do pronome oblíquo é de finida como proclítica, mesoclítica ou enclítica. Analise o fragmento: “(...) é preciso ter certas habilidades e aptidões, responsáveis por torná - lo um profissional competente e diferenciado.” Assinale a alternativa correta em referência ao pronome em dest aque.",
+    "context": "",
+    "options": [
+      {
+        "key": "A",
+        "text": "A posição do pronome do objeto é mesoclítica."
+      },
+      {
+        "key": "B",
+        "text": "A posição do pronome do objeto é proclítica."
+      },
+      {
+        "key": "C",
+        "text": "A posição do pronome do objeto é enclítica."
+      },
+      {
+        "key": "D",
+        "text": "A posição do pronome do sujeito é enclítica."
+      },
+      {
+        "key": "E",
+        "text": "A posição do pronome do sujeito é mesoclítica. DIREITO APLICADO"
+      }
+    ],
+    "type": "choice"
+  }
+]

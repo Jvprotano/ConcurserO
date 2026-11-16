@@ -1,0 +1,16 @@
+# Fontes e ordem de carga das questões
+
+O banco de prática separa a demonstração autoral das questões de provas. A tela **Visão geral** usa o acervo importado para mostrar incidência por assunto, mesmo sem gabarito. A consulta **Histórico de referência** mantém o catálogo editorial de provas anteriores. Questões extraídas ficam visíveis; sem gabarito compatível, a correção continua pendente. O preliminar da própria prova permite corrigir, mantendo essa identificação.
+
+| Prioridade | Prova | Fonte e situação |
+| --- | --- | --- |
+| Referência PF | Perito Criminal Federal, Área 3, Cebraspe, 2025 | [Cadernos e gabaritos definitivos da PF](concursos-piloto.md#polícia-federal--cebraspe-2025). Carga de 120 itens em dois blocos. |
+| Complemento PF | Perito Criminal Federal, Área 3, Cebraspe, 2018 | [Cadernos no arquivo da PF](https://www.gov.br/pf/pt-br/acesso-a-informacao/servidores/concursos/provas-e-gabaritos-de-concursos-anteriores/concurso-carreira-policial-2018/perito), gabaritos da Cebraspe [básico](https://cdn.cebraspe.org.br/concursos/PF_18/arquivos/GAB_DEFINITIVO_408_DGPPFCB1__PAG_4.PDF) e [específico atualizado](https://cdn.cebraspe.org.br/concursos/PF_18/arquivos/GAB_DEFINITIVO_408_DGPPF004_ATUALIZADO.PDF). Carga de 120 itens. |
+| Referência PR | Perito Oficial Criminal, Área 3, IBFC, 2024 | [Certame na banca](https://concursos-adm-sigcp.ibfc.org.br/informacoes/449/). Caderno em espelho, 80 questões em cada versão A/B/C. O link pós-recurso está na área do candidato. O PDF em espelho traz respostas preliminares para a Área 3. |
+| Complemento PR | Perito Criminal, Área 1 (Computação), IBFC, 2017 | [Histórico e caderno](historico-de-provas.md). 90 questões mapeadas na Visão geral. A edição ainda não tem carga de prática validada. |
+
+O [QConcursos cataloga a mesma prova da PF de 2025](https://www.qconcursos.com/questoes-de-concursos/provas/cespe-cebraspe-2025-policia-federal-perito-criminal-federal-area-3-informatica-forense) com classificação por disciplina e assunto. A página permite verificar a origem da prova; não revela como o serviço obtém ou revisa todo o acervo. Para as cargas, usar o caderno e o gabarito publicados pela banca ou órgão. Espelhos servem para recuperar PDFs identificáveis quando o original não está aberto. A organização e os comentários do QConcursos têm [termos próprios](https://www.qconcursos.com/termos-de-uso) e não são insumos da carga.
+
+Para escolher provas relacionadas, começar pelo mesmo cargo e área. Ampliar depois para a mesma banca com assuntos presentes no edital de estudo; usar outras bancas para suprir lacunas em temas específicos. Ao revisar uma carga, priorizar os assuntos recorrentes que ainda constam do edital e aqueles com pouca prática. Conferir leis, normas e tecnologias que mudaram desde a prova. Questões anuladas conservam a origem e ficam fora da prática corrigível.
+
+O catálogo guarda a URL e a assinatura de cada PDF conferido. Se a fonte alterar um arquivo, revisar a publicação e atualizar o catálogo antes de incorporar a nova versão. A carga guarda a edição e o bloco de origem. As questões já entram na consulta e nas análises; com gabarito, **Salvar todas as questões** habilita a prática e cria os vínculos de assuntos na edição de estudo. A edição individual permanece disponível em Detalhes.

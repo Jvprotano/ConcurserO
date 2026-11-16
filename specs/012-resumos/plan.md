@@ -1,0 +1,6 @@
+# Plano
+
+- Tela Resumos no menu. Editor visual com os comandos de texto suportados pelo Chromium da aplicação desktop. O HTML é tratado como dado e reconstruído no navegador com uma lista de elementos permitidos, sem atributos. Colagem entra como texto. Salvamento explícito com aviso de alterações pendentes e controle de versão para evitar sobrescrita em abas abertas.
+- Persistir no SQLite via migração aditiva. Armazenar identificadores opcionais e rótulos de referência para que a cópia seja portável. Abrir editor contextual em outra aba a partir da sessão de estudo, reutilizando os dados de edital e apostila.
+- Manter formato JSON versionado com resumos ativos e arquivados. Gravar arquivo diário por instalação via arquivo temporário e renomeação. A configuração da pasta fica no banco local, fora do arquivo de resumos. Backup opcional via pasta sincronizada delega o envio ao cliente Google Drive instalado pelo usuário, sem copiar o banco ativo ou os PDFs.
+- Restaurar transacionalmente. Identificar divergências por conteúdo e dar à cópia um identificador estável para retentativas. Validar a migração, a ida e volta e a falha de escrita em banco temporário. Exercitar editor e navegação num Chromium quando disponível.

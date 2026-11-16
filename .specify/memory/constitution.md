@@ -1,0 +1,12 @@
+# Constituição do ConcurserO
+
+1. **A especificação precede o código.** Cada entrega tem objetivos, comportamentos observáveis, exceções e critérios de aceite. Mudanças de escopo atualizam primeiro a especificação afetada. O plano registra escolhas técnicas, e as tarefas apontam para os requisitos que entregam.
+2. **A prática exige uma tentativa.** Questões e cartões apresentam o desafio antes da solução. Revisões ficam distribuídas ao longo dos dias. Resumos dão suporte à compreensão e à consulta.
+3. **Conteúdo importado tem procedência e fica disponível.** Questões e gabaritos mantêm referência ao arquivo, página e identificação original. Importar um caderno disponibiliza as questões e alimenta as análises. Sem gabarito, mostrar a pendência sem gerar correção. Com gabarito, permitir salvar todas as questões de uma vez; conferência e edição individual são opcionais.
+4. **O progresso é preservado.** Edições de conteúdo, retentativas de importação e mudanças no agendamento preservam as tentativas e revisões já registradas. Operações que atualizam mais de um registro têm resultado consistente.
+5. **A primeira versão é local e de uso pessoal.** Interface em português, operação no computador do estudante e dados locais. Mudanças que envolvam contas, envio de arquivos a terceiros ou sincronização exigem revisão do escopo.
+6. **A validação acompanha a entrega.** A implementação demonstra o fluxo principal de ponta a ponta e verifica os casos em que uma falha pode trocar um gabarito, duplicar dados ou perder progresso.
+7. **KISS e minimalismo.** A interface mostra só o necessário para entender o motivo de uma ação, seu resultado e o próximo passo. Detalhes e exceções aparecem quando forem relevantes; evitar longas explicações e controles permanentes para operações ocasionais.
+8. **O foco é desempenho em concursos.** O edital orienta o conteúdo do plano. A organização usa disciplinas, assuntos e subassuntos familiares ao mercado de concursos, distintos de cargo/área e bloco. Decisões de priorização se apoiam em evidência e distinguem incidência histórica, pesos e desempenho individual; amostra insuficiente ou falta de classificação não é sinal de irrelevância. Pesquisar e documentar referências antes de criar convenções próprias.
+
+Para cada nova entrega, crie uma pasta numerada em `specs/` com especificação, plano e tarefas. Antes de implementar, confira a cobertura entre requisitos, critérios e tarefas. O ConcurserO adota o fluxo documentado pelo [GitHub Spec Kit](https://github.github.com/spec-kit/reference/agentic-sdd.html).

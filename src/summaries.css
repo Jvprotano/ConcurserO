@@ -1,0 +1,30 @@
+.summary-layout { display: grid; grid-template-columns: minmax(200px, 1fr) minmax(0, 2.8fr); gap: 14px; align-items: start; }
+.summary-layout > .panel { margin: 0; }
+.summary-library { display: grid; gap: 12px; }
+.summary-library > label { margin: 0; }
+.summary-library > .button { justify-self: start; }
+.summary-tabs { width: max-content; max-width: 100%; }
+.summary-list { max-height: 55vh; overflow: auto; }
+.summary-result { display: grid; gap: 3px; width: 100%; border: 1px solid transparent; border-radius: 8px; padding: 9px 10px; text-align: left; background: transparent; color: inherit; overflow-wrap: anywhere; }
+.summary-result:hover, .summary-result[aria-current] { background: #eef4e8; border-color: #cbd6cc; }
+.summary-result small, .summary-meta, .summary-footer small { color: var(--muted); font-size: .83rem; }
+.summary-form fieldset { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: 12px; }
+.summary-header { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; }
+.summary-header label { flex: 1 1 14rem; margin: 0; }
+.summary-details[open] { padding: 0 0 12px; border-bottom: 1px solid var(--border); }
+.summary-editor { border: 1px solid var(--border); border-radius: 9px; min-width: 0; }
+.summary-format { display: flex; gap: 3px; flex-wrap: wrap; padding: 5px; background: #f5f7f1; border-radius: 9px 9px 0 0; border-bottom: 1px solid var(--border); }
+.summary-format button { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 6px; border: 0; background: transparent; color: var(--green); }
+.summary-format button:hover, .summary-format button:focus-visible { background: #e3ecdb; }
+.summary-paper { min-height: 290px; padding: 18px clamp(12px, 3vw, 30px); font-size: 1rem; line-height: 1.68; overflow-wrap: anywhere; }
+.summary-paper[contenteditable="true"]:empty::before { content: "Escreva seu resumo…"; color: var(--muted); pointer-events: none; }
+.summary-paper p, .summary-paper h2, .summary-paper h3 { margin: 0 0 .65em; }
+.summary-paper ul, .summary-paper ol { padding-left: 1.5em; }
+.summary-footer { display: flex; justify-content: space-between; gap: 8px; align-items: center; flex-wrap: wrap; }
+.summary-empty { min-height: 290px; display: grid; gap: 10px; align-content: center; justify-items: center; color: var(--muted); }
+.summary-backup > summary > svg { vertical-align: -3px; margin-right: 5px; }
+.summary-backup > form { margin-top: 14px; }
+@media (max-width: 730px) {
+  .summary-layout { grid-template-columns: 1fr; }
+  .summary-list { max-height: 14rem; }
+}
