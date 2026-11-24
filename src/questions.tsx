@@ -1,83 +1,85 @@
 import { useEffect, useState } from 'react';
 import { ArrowRight, ListFilter } from 'lucide-react';
-import { emptyQuestionFilters, filterQuestions, questionDiscipline, topicFilterId, type QuestionFilters } from '../shared/questions.ts';
-import type { ImportSummary, QuestionBank } from '../shared/types.ts';
+import { emptyQuestionFilters, questionContent, questionDiscipline, type QuestionFilters } from '../shared/questions.ts';
+import type { FilterOption, QuestionCatalog, QuestionListPage } from '../shared/question-catalog.ts';
+import type { Attempt, BankQuestion, ImportSummary } from '../shared/types.ts';
 import { api, message } from './api.ts';
-import { Empty, SourceLink } from './common.tsx';
+import { Empty } from './common.tsx';
 import { QuestionAnswer, type SharedProps } from './study.tsx';
 import type { FocusSelection } from './overview.tsx';
 import { relatedTopics } from '../shared/preparation.ts';
+import { RemoveButton, useBatchRemoval } from './removal.tsx';
 
-export function Questions({ state, mutate, initialTopicId, initialFocus, changed, openAcervo }: SharedProps & {
-  initialTopicId: string; changed: () => Promise<void>; openAcervo: (jobId?: string) => void;
-  initialFocus?: FocusSelection;
+const count = (value: number) => value.toLocaleString('pt-BR');
+
+export function Questions({ state, mutate, initialTopicId, initialFocus, questionId, proofs = false, changed, openAcervo }: SharedProps & {
+  initialTopicId?: string; initialFocus?: FocusSelection; questionId?: string; proofs?: boolean;
+  changed: () => Promise<void>; openAcervo: (jobId?: string) => void;
 }) {
-  const initialTopic = state.topics.find(topic => topic.id === initialTopicId);
-  const initial: QuestionFilters = { ...emptyQuestionFilters, topicIds: [], contentTopics: initialTopic
-    ? relatedTopics(state, initialTopic).map(topic => ({ discipline: topic.discipline, title: topic.title })) : undefined,
-    ...(initialFocus ?? {}) };
+  const topic = state.topics.find(row => row.id === initialTopicId);
+  const initial: QuestionFilters = { ...emptyQuestionFilters, contentTopics: topic
+    ? relatedTopics(state, topic).map(({ discipline, title }) => ({ discipline, title })) : undefined,
+    ...initialFocus, ...(questionId && { questionId, status: 'all' }) };
   const [filters, setFilters] = useState(initial);
-  const [applied, setApplied] = useState(initial);
-  const [attempts, setAttempts] = useState(state.attempts);
-  const [bank, setBank] = useState<QuestionBank>();
+  const [request, setRequest] = useState({ filters: initial, page: 0 });
+  const [catalog, setCatalog] = useState<QuestionCatalog>();
+  const [results, setResults] = useState<QuestionListPage>();
   const [error, setError] = useState('');
-  const [page, setPage] = useState(0);
-  const [session, setSession] = useState(0);
-  const [busyIds, setBusyIds] = useState<Set<string>>(() => new Set());
+  const [loadVersion, setLoadVersion] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [answering, setAnswering] = useState(new Set<string>());
   const [savingImport, setSavingImport] = useState('');
-  const busy = busyIds.size > 0 || Boolean(savingImport);
-  function load() {
-    return api<QuestionBank>('/question-bank');
-  }
+  const [draftsOpen, setDraftsOpen] = useState(proofs);
+  const imports = JSON.stringify([state.localQuestionCount, state.imports.map(row => [row.id, row.status, row.completed, row.message])]);
+  const reload = () => { setLoading(true); setLoadVersion(value => value + 1); };
+  const removalTarget = (id: string) => ({ kind: 'gran-question' as const, id, title: 'Questão Gran Q' + id });
+  const removal = useBatchRemoval(results?.questions.flatMap(row => row.gran ? [removalTarget(row.gran.id)] : []) ?? [], mutate, reload);
+  const busy = loading || answering.size > 0 || Boolean(savingImport) || removal.selecting;
+
   useEffect(() => {
-    let current = true;
+    let active = true;
     let timer: ReturnType<typeof setTimeout>;
-    async function refreshBank() {
+    async function loadCatalog() {
       try {
-        const result = await load();
-        if (!current) return;
-        setBank(result);
-        if (result.drafts.some(draft => draft.status === 'queued' || draft.status === 'processing')) timer = setTimeout(() => void refreshBank(), 1000);
-      } catch (error) { if (current) setError(message(error)); }
+        const value = await api<QuestionCatalog>('/questions/catalog' + (proofs ? '?proofs=1' : ''));
+        if (!active) return;
+        setCatalog(value);
+        if (value.drafts.some(row => row.status === 'queued' || row.status === 'processing')) {
+          timer = setTimeout(loadCatalog, 1000);
+        }
+      } catch (error) { if (active) setError(message(error)); }
     }
-    void refreshBank();
-    return () => { current = false; clearTimeout(timer); };
-  }, [state.imports]);
+    void loadCatalog();
+    return () => { active = false; clearTimeout(timer); };
+  }, [proofs, imports, loadVersion]);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true); setError('');
+    api<QuestionListPage>('/questions/search', 'POST', { ...request, proofs })
+      .then(value => { if (active) setResults(value); })
+      .catch(error => { if (active) setError(message(error)); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [proofs, request, imports, loadVersion]);
+
+  const latest = new Map<string, Attempt>();
+  for (const attempt of state.attempts) if (!latest.has(attempt.questionId)) latest.set(attempt.questionId, attempt);
   function apply(next: QuestionFilters) {
-    setFilters(next); setApplied(next); setAttempts(state.attempts); setPage(0); setSession(session + 1);
+    setLoading(true); setFilters(next); setRequest({ filters: next, page: 0 });
   }
-  function field(key: keyof Omit<QuestionFilters, 'topicIds' | 'contentTopics'>, label: string, options: { value: string; label: string }[]) {
-    return <label>{label}<select value={filters[key]} onChange={event => setFilters({ ...filters, [key]: event.target.value,
+  function goToPage(page: number) {
+    setLoading(true); setRequest({ ...request, page });
+    document.getElementById('question-results')?.scrollIntoView({ block: 'start' });
+  }
+  function field(key: keyof Omit<QuestionFilters, 'topicIds' | 'contentTopics'>, label: string, options: FilterOption[], defaultLabel = 'Todos',
+    disabled = false) {
+    return <label>{label}<select disabled={disabled} value={filters[key] ?? ''} onChange={event => setFilters({ ...filters, [key]: event.target.value,
       ...(key === 'discipline' ? { topicIds: [], syllabusTopicId: '', themeId: '' } :
         key === 'syllabusTopicId' ? { themeId: '' } : {}) })}>
-      <option value="">Todos</option>{options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+      <option value="">{defaultLabel}</option>{options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
     </select></label>;
   }
-  if (!bank) return <div role={error ? 'alert' : 'status'}>{error || 'Carregando banco de questões…'}
-    {error && <button className="button secondary" onClick={() => { setError(''); void load().then(setBank).catch(error => setError(message(error))); }}>Tentar novamente</button>}
-  </div>;
-  const ready = bank.questions.filter(question => question.status !== 'annulled');
-  const official = ready.filter(question => question.exam !== 'demo').length;
-  const annulled = bank.questions.length - ready.length;
-  const results = filterQuestions(bank.questions, applied, attempts);
-  const pageSize = 10;
-  const pages = Math.max(1, Math.ceil(results.length / pageSize));
-  const currentPage = Math.min(page, pages - 1);
-  const topics = [...new Map(ready.filter(question => !filters.discipline || questionDiscipline(question) === filters.discipline)
-    .map(question => {
-      const topicId = topicFilterId(question.discipline, question.topicTitle);
-      return [topicId, { ...question, topicId }] as const;
-    })).values()];
-  const disciplines = [...new Set(ready.map(questionDiscipline))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
-  const classified = ready.filter(row => row.analysis && (!filters.discipline || questionDiscipline(row) === filters.discipline));
-  const syllabusTopics = [...new Map(classified.map(row => [row.analysis!.topicId,
-    { value: row.analysis!.topicId, label: row.analysis!.topic + (!filters.discipline ? ' · ' + row.analysis!.discipline : '') }])).values()]
-    .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
-  const subtopics = [...new Map(classified.filter(row => !filters.syllabusTopicId || row.analysis!.topicId === filters.syllabusTopicId)
-    .map(row => [row.analysis!.id, { value: row.analysis!.id, label: row.analysis!.label + ' · ' + row.analysis!.topic }])).values()]
-    .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
-  const exams = [...new Set(ready.map(question => question.exam))].sort().reverse();
-  const pending = ready.filter(question => question.status === 'pending').length;
   async function saveAll(draft: ImportSummary) {
     if (busy) return;
     setSavingImport(draft.id); setError('');
@@ -86,89 +88,115 @@ export function Questions({ state, mutate, initialTopicId, initialFocus, changed
         { requestId: crypto.randomUUID(), keyId: draft.keyId });
       await mutate(async () => undefined, result.published + ' questões salvas.' +
         (result.pending.length ? ' ' + result.pending.length + ' com pendência no caderno.' : ''));
-      setBank(await load());
+      reload();
     } catch (error) { setError(message(error)); }
     finally { setSavingImport(''); }
   }
+  function renderQuestion(question: BankQuestion) {
+    const path = questionContent(question);
+    const target = question.gran && removalTarget(question.gran.id);
+    const attempt = latest.get(question.id);
+    const title = question.exam === 'demo' ? 'Demonstração autoral' : question.examLabel || question.exam;
+    return <article className="panel" key={question.id + ':' + question.revision}>
+      <div className="section-heading wrap">
+        <h3>{question.gran ? 'Questão Q' + question.gran.id : 'Questão ' + question.number}</h3>
+        {target && (removal.selecting ? removal.checkbox(target) : <RemoveButton {...target} mutate={mutate} onRemoved={reload} disabled={busy}/>)}
+      </div>
+      <p className="eyebrow">{[questionDiscipline(question), path?.topic || question.topicTitle].filter(Boolean).join(' → ')}</p>
+      {path?.subtopic && <p className="meta">{path.subtopic}</p>}
+      <p className="meta">{[question.board, title, question.version, question.gran && 'Gran Questões'].filter(Boolean).join(' · ')}</p>
+      {question.gran?.discipline && question.gran.discipline !== questionDiscipline(question) && <details className="meta">
+        <summary>Classificação de origem</summary>{[question.gran.discipline, question.gran.topic].filter(Boolean).join(' → ')}
+      </details>}
+      {attempt && <p className="meta">Última tentativa · {attempt.correct ? (attempt.guess ? 'Acerto por chute' : 'Acerto') : 'Erro'}</p>}
+      <QuestionAnswer question={question} changed={changed} onBusy={value => setAnswering(previous => {
+        const next = new Set(previous);
+        if (value) next.add(question.id);
+        else next.delete(question.id);
+        return next;
+      })}/>
+      {question.status !== 'ready' && <p className="callout attention">{question.status === 'annulled'
+        ? 'Questão anulada pela banca.' : question.pendingReason || 'Gabarito indisponível.'}
+        {question.status === 'pending' && question.importId && <> <button className="text-button" onClick={() => openAcervo(question.importId)}>Abrir caderno</button></>}
+      </p>}
+    </article>;
+  }
+
   return <>
-    <section className="panel">
-      <div className="section-heading"><h2>Banco de questões</h2>
-        <button className="button secondary" onClick={() => openAcervo()}>Adicionar questões <ArrowRight size={16}/></button></div>
-      <p className="muted">{official} questões de provas · {pending} pendentes · {ready.filter(question => question.exam === 'demo').length} de demonstração</p>
-      {error && <p className="alert" role="alert">{error}</p>}
-      {bank.drafts.map(draft => <div className="task-row topic-row" key={draft.id}><div><h3>{draft.name}</h3>
+    {error && <p className="alert" role="alert">{error} <button type="button" className="text-button" onClick={reload}>Tentar novamente</button></p>}
+    {catalog && <form className="panel" onSubmit={event => { event.preventDefault(); apply(filters); }}>
+      <div className="section-heading wrap"><h2><ListFilter size={20}/> Filtrar questões</h2>
+        {!proofs && catalog.granCount > 0 && <span className="meta">{count(catalog.granCount)} questões do Gran no banco local</span>}
+      </div>
+      <fieldset className="bank-filter-fields" disabled={busy}>
+        {filters.contentTopics?.length ? <p className="muted">Assunto do edital · {topic?.title} <button type="button" className="text-button"
+          onClick={() => apply({ ...filters, contentTopics: undefined })}>Remover recorte</button></p> : null}
+        {filters.questionId && <p className="muted">Histórico da questão <button type="button" className="text-button"
+          onClick={() => apply({ ...emptyQuestionFilters })}>Ver todas</button></p>}
+        <label>Buscar questões<input type="search" value={filters.search} placeholder="Enunciado, assunto ou código"
+          onChange={event => setFilters({ ...filters, search: event.target.value, questionId: undefined })}/></label>
+        <div className="form-grid bank-filter-grid">
+          {field('discipline', 'Disciplina', catalog.disciplines)}
+          {field('syllabusTopicId', 'Assunto', catalog.subjects.filter(row => filters.discipline
+            ? row.discipline === filters.discipline : row.value === filters.syllabusTopicId),
+          filters.discipline ? 'Todos' : 'Selecione a disciplina', !filters.discipline && !filters.syllabusTopicId)}
+          {field('board', 'Banca', catalog.boards)}
+          {field('history', 'Minhas respostas', [{ value: 'unanswered', label: 'Não respondidas' }, { value: 'answered', label: 'Respondidas' },
+            { value: 'wrong', label: 'Errei na última tentativa' }, { value: 'correct', label: 'Acertei na última tentativa' },
+            { value: 'guess', label: 'Chute na última tentativa' }])}
+        </div>
+        <details open={filters.themeId || filters.exam || filters.block || filters.trailId || filters.topicIds.length ? true : undefined}>
+          <summary>Mais filtros</summary>
+          <div className="form-grid bank-filter-grid">
+            {!proofs && field('origin', 'Origem', [{ value: 'gran', label: 'Gran Questões' }, { value: 'pdf', label: 'Cadernos PDF' },
+              { value: 'demo', label: 'Demonstração autoral' }])}
+            {field('status', 'Situação', [{ value: 'all', label: 'Todas' }, { value: 'ready', label: 'Com gabarito' },
+              { value: 'pending', label: 'Pendentes' }, { value: 'annulled', label: 'Anuladas' }], 'Exceto anuladas')}
+            {field('exam', 'Prova de origem', catalog.exams)}
+            {field('trailId', 'Concurso do Acervo', state.trails.map(row => ({ value: row.id, label: row.title })))}
+            {catalog.subtopics.length > 0 && field('themeId', 'Subassunto', catalog.subtopics.filter(row =>
+              (!filters.discipline || row.discipline === filters.discipline) && (!filters.syllabusTopicId || row.topicId === filters.syllabusTopicId)))}
+            {catalog.blocks.length > 0 && field('block', 'Bloco', catalog.blocks)}
+            {field('type', 'Formato', [{ value: 'choice', label: 'Múltipla escolha' }, { value: 'boolean', label: 'Certo ou errado' }])}
+          </div>
+          {!!catalog.personalTopics.length && <details className="bank-topics"><summary>Classificação pessoal</summary>
+            <div className="bank-topic-list">{catalog.personalTopics.filter(row => !filters.discipline || row.discipline === filters.discipline)
+              .map(row => <label className="check" key={row.value}>
+                <input type="checkbox" checked={filters.topicIds.includes(row.value)} onChange={event => setFilters({ ...filters,
+                  topicIds: event.target.checked ? [...filters.topicIds, row.value] : filters.topicIds.filter(id => id !== row.value) })}/>
+                <span>{row.label} <small className="meta">{row.edition}</small></span>
+              </label>)}</div>
+          </details>}
+        </details>
+        <div className="actions"><button className="button primary">Filtrar questões</button>
+          <button type="button" className="text-button" onClick={() => apply({ ...emptyQuestionFilters })}>Limpar filtros</button></div>
+      </fieldset>
+    </form>}
+    {catalog && (proofs || catalog.drafts.length > 0) && <details className="panel" open={draftsOpen} onToggle={event => setDraftsOpen(event.currentTarget.open)}>
+      <summary>Cadernos do Acervo</summary>
+      <button className="text-button" onClick={() => openAcervo()}>Importar caderno</button>
+      {catalog.drafts.map(draft => <div className="task-row topic-row" key={draft.id}><div><h3>{draft.name}</h3>
         <p>{draft.count} questões · {draft.message}{draft.keys.find(key => key.id === draft.keyId)?.preliminary ? ' · Gabarito preliminar' : ''}</p></div>
         {draft.keyId && <button className="button primary" disabled={busy} onClick={() => void saveAll(draft)}>
           {savingImport === draft.id ? 'Salvando…' : 'Salvar todas as questões'}</button>}
         <button className={draft.keyId ? 'text-button' : 'button secondary'} onClick={() => openAcervo(draft.id)}>Abrir caderno</button>
       </div>)}
-    </section>
-    <form className="panel" onSubmit={event => { event.preventDefault(); apply(filters); }}>
-      <h2><ListFilter size={20}/> Filtrar questões</h2>
-      {!!filters.contentTopics?.length && <p className="muted">Assunto do edital: {initialTopic?.title} <button type="button" className="text-button" disabled={busy}
-        onClick={() => apply({ ...filters, contentTopics: undefined })}>Remover recorte</button></p>}
-      {filters.themeId && <p className="muted">Subassunto: {bank.questions.find(row => row.analysis?.id === filters.themeId)?.analysis?.label ?? filters.themeId}
-        {' '}<button type="button" className="text-button" disabled={busy}
-          onClick={() => apply({ ...filters, themeId: '' })}>Remover subassunto</button></p>}
-      <fieldset className="bank-filter-fields" disabled={busy}>
-        <label>Buscar no enunciado ou assunto<input type="search" value={filters.search} placeholder="Ex.: redes, cadeia de custódia…"
-          onChange={event => setFilters({ ...filters, search: event.target.value })}/></label>
-        <div className="form-grid bank-filter-grid">
-          {field('trailId', 'Concurso de origem', state.trails.map(trail => ({ value: trail.id, label: trail.title })))}
-          {field('discipline', 'Disciplina', disciplines.map(value => ({ value, label: value })))}
-          {field('syllabusTopicId', 'Assunto', syllabusTopics)}
-          <details><summary>Mais filtros</summary>
-          {field('themeId', 'Subassunto', subtopics)}
-          {field('exam', 'Prova de origem', exams.map(value => ({ value, label: value === 'demo' ? 'Demonstração autoral' : ready.find(question => question.exam === value)?.examLabel || 'Prova ' + value })))}
-          {field('block', 'Bloco', [...new Set(ready.map(question => question.block))].map(value => ({ value,
-            label: value === 'basico' ? 'Conhecimentos básicos' : value === 'especifico' ? 'Conhecimentos específicos' : value })))}
-          {field('type', 'Formato', [{ value: 'choice', label: 'Múltipla escolha' }, { value: 'boolean', label: 'Certo ou errado' }])}
-          {field('origin', 'Origem', [{ value: 'official', label: 'Questões de provas' }, { value: 'demo', label: 'Demonstração autoral' }])}
-          {field('history', 'Minhas respostas', [{ value: 'unanswered', label: 'Não respondidas' }, { value: 'answered', label: 'Respondidas' },
-            { value: 'wrong', label: 'Errei na última tentativa' }, { value: 'correct', label: 'Acertei na última tentativa' }, { value: 'guess', label: 'Chute na última tentativa' }])}
-          </details>
-        </div>
-        <details className="bank-topics" open={filters.topicIds.length ? true : undefined}>
-          <summary>Classificação pessoal · {filters.topicIds.length ? filters.topicIds.length + ' vínculo(s) selecionado(s)' : 'Opcional'} </summary>
-
-          <div className="bank-topic-list">{topics.map(topic => <label className="check" key={topic.topicId}>
-            <input type="checkbox" checked={filters.topicIds.includes(topic.topicId)} onChange={event => setFilters({ ...filters,
-              topicIds: event.target.checked ? [...filters.topicIds, topic.topicId] : filters.topicIds.filter(id => id !== topic.topicId) })}/>
-            <span>{topic.topicTitle}<small className="meta">{topic.discipline} · {topic.editionTitle}</small></span>
-          </label>)}</div>
-          {!topics.length && <p className="muted">Ainda não há assuntos disponíveis.</p>}
-        </details>
-        <div className="actions"><button className="button primary">Filtrar questões</button>
-          <button type="button" className="text-button" onClick={() => apply({ ...emptyQuestionFilters, topicIds: [] })}>Limpar filtros</button></div>
-      </fieldset>
-    </form>
-    <section aria-label="Questões encontradas">
-      <div className="section-heading"><h2>{results.length} questão(ões) encontrada(s)</h2><span className="meta">{annulled > 0 ? `${annulled} anulada(s) fora do treino` : ''}</span></div>
-
-      {!results.length && <Empty>{ready.length ? 'Nenhuma questão corresponde aos filtros. Limpe os filtros ou confira mais cadernos no Acervo.' : 'Importe um caderno no Acervo para ver suas questões.'}</Empty>}
-      {results.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map((question, index) => <article className="panel" key={session + ':' + question.id + ':' + question.revision}>
-        <p className="eyebrow">{questionDiscipline(question)}{question.analysis && <> → {question.analysis.topic}</>}</p>
-        {question.analysis && <p className="meta">{question.analysis.label}</p>}
-        {question.analysis && <details className="meta"><summary>Classificação pessoal</summary>
-          {question.discipline} · {question.topicTitle}</details>}
-        <h3>Questão {currentPage * pageSize + index + 1} · {question.exam === 'demo' ? 'Demonstração autoral' : `${question.board || 'Banca a definir'} · ${question.examLabel || question.exam}`} · item {question.number}</h3>
-        <p className="meta">{state.trails.find(trail => trail.id === question.trailId)?.title}</p>
-        <p className="meta">{question.block === 'basico' ? 'Conhecimentos básicos' : question.block === 'especifico' ? 'Conhecimentos específicos' : question.block} · {question.version}{question.editionTitle && ' · ' + question.editionTitle}</p>
-        {question.status === 'pending' ? <>
-          <p className="prose">{question.prompt}</p>
-          <SourceLink source={question.source} label="Caderno original"/>
-          {question.context && <details className="callout"><summary>Texto de apoio</summary><p className="prose">{question.context}</p></details>}
-          {question.options.map(option => <p className="option" key={option.key}><strong>{option.key}</strong> {option.text}</p>)}
-          <p className="meta">{question.pendingReason} · <button className="text-button" onClick={() => openAcervo(question.importId)}>Abrir caderno</button></p>
-        </> : <QuestionAnswer question={{ ...question, status: question.status }} changed={changed} onBusy={value => setBusyIds(previous => {
-          const next = new Set(previous); if (value) next.add(question.id); else next.delete(question.id); return next;
-        })}/>}
-      </article>)}
-      {results.length > pageSize && <div className="toolbar wrap" aria-label="Páginas de questões">
-        <button className="button secondary" disabled={!currentPage || busy} onClick={() => setPage(currentPage - 1)}>Anterior</button>
-        <span className="meta" aria-live="polite">Página {currentPage + 1} de {pages}</span>
-        <button className="button secondary" disabled={currentPage + 1 >= pages || busy} onClick={() => setPage(currentPage + 1)}>Próxima <ArrowRight size={16}/></button>
+    </details>}
+    {loading && <p role="status">Carregando questões…</p>}
+    {results && !loading && <section id="question-results" aria-label="Questões encontradas">
+      <div className="section-heading wrap"><h2>{count(results.total)} {results.total === 1 ? 'questão encontrada' : 'questões encontradas'}</h2>
+        {removal.toolbar}
+      </div>
+      {catalog && (catalog.pending > 0 || catalog.annulled > 0) && <p className="meta">
+        {[catalog.pending > 0 && count(catalog.pending) + ' pendentes no acervo', catalog.annulled > 0 && count(catalog.annulled) + ' anuladas no acervo'].filter(Boolean).join(' · ')}
+      </p>}
+      {!results.total && <Empty>{filters.questionId ? 'Esta questão não está disponível no acervo.' : 'Nenhuma questão corresponde aos filtros.'}</Empty>}
+      {results.pages > 1 && <div className="toolbar wrap" aria-label="Páginas de questões">
+        <button className="button secondary" disabled={busy || results.page === 0} onClick={() => goToPage(results.page - 1)}>Anterior</button>
+        <span className="meta" aria-live="polite">Página {count(results.page + 1)} de {count(results.pages)}</span>
+        <button className="button secondary" disabled={busy || results.page + 1 >= results.pages} onClick={() => goToPage(results.page + 1)}>Próxima <ArrowRight size={16}/></button>
       </div>}
-    </section>
+      <div key={loadVersion + ':' + JSON.stringify(request)}>{results.questions.map(renderQuestion)}</div>
+    </section>}
   </>;
 }

@@ -5,24 +5,34 @@ const entities = {
   import: { table: 'imports', title: 'name' }, trail: { table: 'trails', title: 'title' },
   edition: { table: 'editions', title: 'title' }, topic: { table: 'topics', title: 'title' },
   material: { table: 'materials', title: 'title' }, card: { table: 'cards', title: 'front' },
+  summary: { table: 'summaries', title: "json_extract(e.document,'$.title')" },
+  'study-time': { table: "(SELECT * FROM study_sessions WHERE kind='time')", title: "e.title || ' · ' || e.minutes || ' min · ' || strftime('%d/%m/%Y',e.study_day)" },
+  'gran-question': { table: 'gran_saved_questions', title: "'Gran · Questão ' || e.id" },
 } as const;
 
 export function removedItems(store: Store): RemovedItem[] {
   return (Object.keys(entities) as RemovableKind[]).flatMap(kind => {
     const { table, title } = entities[kind];
-    return store.all<RemovedItem>(`SELECT d.kind,d.id,d.removed,e.${title} AS title
+    return store.all<RemovedItem>(`SELECT d.kind,d.id,d.removed,${title} AS title
       FROM removed_items d JOIN ${table} e ON e.id=d.id WHERE d.kind=?`, kind);
   }).sort((a, b) => b.removed.localeCompare(a.removed));
 }
 
 export function removeItem(store: Store, kind: RemovableKind, id: string) {
-  return store.transaction(() => {
-    required(store.get(`SELECT id FROM ${entities[kind].table} WHERE id=?`, id), 'Item inexistente.');
-    if (kind === 'edition' && store.get('SELECT 1 FROM trails WHERE active_edition=?', id)) {
-      throw new Problem('Ative outra edição antes de remover esta. Para retirar todo o objetivo, remova o concurso.', 409);
+  removeItems(store, [{ kind, id }]);
+  return { id };
+}
+
+export function removeItems(store: Store, items: Pick<RemovedItem, 'kind' | 'id'>[]) {
+  store.transaction(() => {
+    const removed = new Date().toISOString();
+    for (const { kind, id } of items) {
+      required(store.get(`SELECT id FROM ${entities[kind].table} WHERE id=?`, id), 'Item inexistente.');
+      if (kind === 'edition' && store.get('SELECT 1 FROM trails WHERE active_edition=?', id)) {
+        throw new Problem('Ative outra edição antes de remover esta. Para retirar todo o objetivo, remova o concurso.', 409);
+      }
+      store.run('INSERT OR IGNORE INTO removed_items VALUES (?,?,?)', kind, id, removed);
     }
-    store.run('INSERT OR IGNORE INTO removed_items VALUES (?,?,?)', kind, id, new Date().toISOString());
-    return { id };
   });
 }
 

@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef } from 'react';
+import type { ReactNode } from 'react';
 import { Bold, Heading2, Italic, List, ListOrdered, Pilcrow, Underline } from 'lucide-react';
 
 const textElements = new Set(['p', 'div', 'br', 'b', 'strong', 'i', 'em', 'u', 'h2', 'h3', 'ul', 'ol', 'li', 'blockquote']);
@@ -42,8 +43,8 @@ const commands = [
   { label: 'Lista numerada', icon: ListOrdered, command: 'insertOrderedList' },
 ];
 
-export function SummaryEditor({ initialHtml, readOnly, changed }: {
-  initialHtml: string; readOnly: boolean; changed: (html: string) => void;
+export function SummaryEditor({ initialHtml, readOnly, busy, changed, action, error }: {
+  initialHtml: string; readOnly: boolean; busy: boolean; changed: (html: string) => void; action: ReactNode; error: string;
 }) {
   const editor = useRef<HTMLDivElement>(null);
   const initial = useRef(initialHtml);
@@ -74,16 +75,21 @@ export function SummaryEditor({ initialHtml, readOnly, changed }: {
     update();
   }
   return <div className="summary-editor">
-    {!readOnly && <div className="summary-format" role="group" aria-label="Formatação">
-      {commands.map(({ label, icon: Icon, command, value }) => <button key={label} type="button"
-        aria-label={label} title={label} onMouseDown={event => event.preventDefault()} onClick={() => format(command, value)}>
-        <Icon size={18} aria-hidden="true"/>
-      </button>)}
+    {!readOnly && <div className="summary-editor-bar">
+      <div className="summary-format" role="group" aria-label="Formatação">
+        {commands.map(({ label, icon: Icon, command, value }) => <button key={label} type="button"
+          aria-label={label} title={label} onMouseDown={event => event.preventDefault()} onClick={() => format(command, value)}>
+          <Icon size={18} aria-hidden="true"/>
+        </button>)}
+      </div>
+      <div className="summary-save-group">{action}</div>
+      {error && <p className="summary-save-error" role="alert">{error}</p>}
     </div>}
-    <div className="summary-paper" ref={editor} contentEditable={!readOnly} role="textbox" aria-multiline="true"
-      aria-readonly={readOnly} aria-label="Conteúdo do resumo" spellCheck lang="pt-BR" onInput={update}
+    <div className="summary-paper" ref={editor} contentEditable={!readOnly && !busy} role="textbox" aria-multiline="true"
+      aria-readonly={readOnly || busy} aria-label="Conteúdo do resumo" spellCheck lang="pt-BR" onInput={update}
       onDrop={event => event.preventDefault()} onPaste={event => {
         event.preventDefault();
+        if (readOnly || busy) return;
         document.execCommand('insertText', false, event.clipboardData.getData('text/plain'));
         update();
       }}/>

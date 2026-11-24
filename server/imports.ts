@@ -156,8 +156,8 @@ export class Imports {
     this.store.run('UPDATE imports SET exam=?,pair=?,source_url=? WHERE id=?', exam, pair, url, jobId);
   }
 
-  cancel(jobId: string) {
-    this.job(jobId);
+  cancel(jobId: string, includeRemoved = false) {
+    this.job(jobId, includeRemoved);
     const worker = this.workers.get(jobId);
     if (!worker) return;
     this.workers.delete(jobId);

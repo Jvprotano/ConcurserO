@@ -30,7 +30,7 @@ export class Store {
   db: DatabaseSync;
   directory: string;
 
-  constructor(directory = resolve(process.env.CONCURSERO_DATA ?? 'data')) {
+  constructor(directory = resolve(process.env.CONCURSERO_DATA ?? 'data'), { recoverImports = true } = {}) {
     this.directory = directory;
     mkdirSync(join(directory, 'pdf'), { recursive: true });
     this.db = new DatabaseSync(join(directory, 'concursero.sqlite'));
@@ -156,7 +156,31 @@ export class Store {
         this.setSetting('summaryBackup', { installation: randomUUID(), directory: '', savedAt: null, error: '' });
       });
     }
-    this.run("UPDATE imports SET status = 'failed', message = 'Processamento interrompido. Retome o rascunho ou tente novamente.' WHERE status IN ('queued', 'processing')");
+    if ((this.get<{ user_version: number }>('PRAGMA user_version')?.user_version ?? 0) < 9) {
+      this.transaction(() => this.db.exec(`
+        CREATE TABLE gran_saved_questions (id TEXT PRIMARY KEY, document TEXT NOT NULL, answer_key TEXT);
+        PRAGMA user_version = 9;
+      `));
+    }
+    if ((this.get<{ user_version: number }>('PRAGMA user_version')?.user_version ?? 0) < 10) {
+      this.transaction(() => {
+        if ((this.get<{ user_version: number }>('PRAGMA user_version')?.user_version ?? 0) >= 10) return;
+        this.db.exec(`
+          CREATE TABLE gran_attempts (
+            id TEXT PRIMARY KEY, question_id TEXT NOT NULL REFERENCES gran_saved_questions(id),
+            topic_id TEXT REFERENCES topics(id), answer TEXT NOT NULL, answer_key TEXT NOT NULL,
+            correct INTEGER NOT NULL, guess INTEGER NOT NULL, reason TEXT NOT NULL DEFAULT '',
+            created TEXT NOT NULL, study_day TEXT NOT NULL
+          );
+          CREATE INDEX gran_attempts_question ON gran_attempts(question_id);
+          ALTER TABLE cards ADD COLUMN gran_attempt_id TEXT REFERENCES gran_attempts(id);
+          ALTER TABLE study_sessions ADD COLUMN gran_attempt_id TEXT REFERENCES gran_attempts(id);
+          CREATE UNIQUE INDEX study_sessions_gran_attempt ON study_sessions(gran_attempt_id);
+          PRAGMA user_version = 10;
+        `);
+      });
+    }
+    if (recoverImports) this.run("UPDATE imports SET status = 'failed', message = 'Processamento interrompido. Retome o rascunho ou tente novamente.' WHERE status IN ('queued', 'processing')");
   }
 
   run(sql: string, ...values: SQLInputValue[]) { return this.db.prepare(sql).run(...values); }

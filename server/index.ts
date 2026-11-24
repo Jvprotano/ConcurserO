@@ -1,5 +1,6 @@
 import express from 'express';
 import { loadExamPack } from './exam-packs.ts';
+import { granQuestionRoutes } from './gran-questions.ts';
 import { resolve } from 'node:path';
 import { z, ZodError } from 'zod';
 import { Problem, Store, localDate, required } from './db.ts';
@@ -10,52 +11,91 @@ import {
 import { Imports, draftInput, publicationInput, saveAllInput } from './imports.ts';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
-import { removeItem, removedItems, restoreItem } from './removal.ts';
-import { summaryRoutes } from './summaries.ts';
+import { removeItem, removeItems, removedItems, restoreItem } from './removal.ts';
+import type { RemovedItem } from '../shared/types.ts';
+import { summaryRoutes, writeBackup } from './summaries.ts';
 import { importStudyPdf, linkStudyPdf, materialLinkInput, pdfInput, recordStudySession, sessionInput,
   sessionOptions, studyPdfPath } from './agenda.ts';
+import { recordStudyTime, startStudyTimer, studyTimeInput, timerAction, timerStartInput, updateStudyTimer } from './study-time.ts';
+import { findLocalGranQuestion, granQuestionsForTopics, isGranQuestion } from './local-gran.ts';
+import { questionCatalog, searchQuestions, searchQuestionsInput } from './question-catalog.ts';
+import { relatedTopics } from '../shared/preparation.ts';
 
-export function createApp(store = new Store()) {
+export function createApp(store = new Store(), { desktopToken, staticDirectory = resolve('dist') }:
+  { desktopToken?: string; staticDirectory?: string } = {}) {
   const app = express();
   const imports = new Imports(store);
   app.disable('x-powered-by');
   app.use((req, res, next) => {
-    const host = req.get('Host') ?? '';
-    if (!/^127\.0\.0\.1(?::\d{1,5})?$/.test(host)) {
-      res.status(403).json({ error: 'Abra o app pelo endereço 127.0.0.1.' });
-      return;
-    }
-    const origin = req.get('Origin');
-    if (origin && origin !== 'http://' + host) {
-      res.status(403).json({ error: 'Origem não autorizada.' });
-      return;
+    if (desktopToken) {
+      if (req.get('X-ConcurserO-Session') !== desktopToken) {
+        res.status(403).json({ error: 'Sessão não autorizada.' });
+        return;
+      }
+    } else {
+      const host = req.get('Host') ?? '';
+      if (!/^127\.0\.0\.1(?::\d{1,5})?$/.test(host)) {
+        res.status(403).json({ error: 'Abra o app pelo endereço 127.0.0.1.' });
+        return;
+      }
+      const origin = req.get('Origin');
+      if (origin && origin !== 'http://' + host) {
+        res.status(403).json({ error: 'Origem não autorizada.' });
+        return;
+      }
     }
     res.set('X-Content-Type-Options', 'nosniff');
     res.set('Referrer-Policy', 'no-referrer');
-    res.set('Content-Security-Policy', "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+    res.set('Content-Security-Policy', "default-src 'self'; img-src 'self' https://arquivos.infra-questoes.grancursosonline.com.br; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     if (req.path.startsWith('/api/')) res.set('Cache-Control', 'no-store');
     next();
   });
   app.use(express.json({ limit: '12mb' }));
   app.use('/api/summaries', summaryRoutes(store));
+  app.use('/api/online-questions/gran', granQuestionRoutes(store));
 
-  const removableKind = z.enum(['import', 'trail', 'edition', 'topic', 'material', 'card']);
+  const removableKind = z.enum(['import', 'trail', 'edition', 'topic', 'material', 'card', 'summary', 'study-time', 'gran-question']);
+  function remove(items: Pick<RemovedItem, 'kind' | 'id'>[]) {
+    removeItems(store, items);
+    const documents = new Set(items.filter(item => item.kind === 'import').map(item => item.id));
+    const trails = new Set(items.filter(item => item.kind === 'trail').map(item => item.id));
+    for (const jobId of imports.workers.keys()) {
+      if (documents.has(jobId) || trails.has(imports.job(jobId, true).trailId)) imports.cancel(jobId, true);
+    }
+    if (items.some(item => item.kind === 'summary')) writeBackup(store);
+  }
   app.get('/api/removed-items', (_req, res) => res.json(removedItems(store)));
+  app.post('/api/items/batch-remove', (req, res) => {
+    const { items } = z.object({ items: z.array(z.object({ kind: removableKind, id })).min(1) }).parse(req.body);
+    remove(items);
+    res.json({ removed: items.length });
+  });
   app.delete('/api/items/:kind/:item', (req, res) => {
     const kind = removableKind.parse(req.params.kind);
     const itemId = id.parse(req.params.item);
-    if (kind === 'import' && imports.workers.has(itemId)) imports.cancel(itemId);
-    if (kind === 'trail') {
-      for (const jobId of imports.workers.keys()) {
-        if (imports.job(jobId).trailId === itemId) imports.cancel(jobId);
-      }
-    }
-    res.json(removeItem(store, kind, itemId));
+    remove([{ kind, id: itemId }]);
+    res.json({ id: itemId });
   });
-  app.post('/api/items/:kind/:item/restore', (req, res) =>
-    res.json(restoreItem(store, removableKind.parse(req.params.kind), id.parse(req.params.item))));
+  app.post('/api/items/:kind/:item/restore', (req, res) => {
+    const kind = removableKind.parse(req.params.kind);
+    const result = restoreItem(store, kind, id.parse(req.params.item));
+    if (kind === 'summary') writeBackup(store);
+    res.json(result);
+  });
 
   app.get('/api/state', (_req, res) => res.json(studyState(store)));
+  app.post('/api/study-time', (req, res) => {
+    recordStudyTime(store, studyTimeInput.parse(req.body));
+    res.json({ saved: true });
+  });
+  app.post('/api/study-timer', (req, res) => {
+    startStudyTimer(store, timerStartInput.parse(req.body));
+    res.json({ saved: true });
+  });
+  app.post('/api/study-timer/:timer/:action', (req, res) => {
+    updateStudyTimer(store, z.uuid().parse(req.params.timer), timerAction.parse(req.params.action));
+    res.json({ saved: true });
+  });
   app.post('/api/study-pdfs', express.raw({ type: 'application/pdf', limit: '50mb' }), (req, res) => {
     const result = importStudyPdf(store, req.body, pdfInput.parse(req.query));
     res.status(result.duplicate ? 200 : 201).json(result);
@@ -70,8 +110,12 @@ export function createApp(store = new Store()) {
       id.parse(req.params.material), id.parse(req.params.topic));
     res.json({ saved: true });
   });
-  app.get('/api/study-sessions/:topic/options', (req, res) =>
-    res.json(sessionOptions(studyState(store), id.parse(req.params.topic), questionBank(store).questions)));
+  app.get('/api/study-sessions/:topic/options', (req, res) => {
+    const state = studyState(store);
+    const topicId = id.parse(req.params.topic);
+    const topic = required(state.topics.find(row => row.id === topicId && row.syllabus), 'Tópico do edital inexistente.');
+    res.json(sessionOptions(state, topicId, [...questionBank(store).questions, ...granQuestionsForTopics(store, relatedTopics(state, topic))]));
+  });
   app.post('/api/study-sessions/:topic', (req, res) =>
     res.json(recordStudySession(store, studyState(store), id.parse(req.params.topic), sessionInput.parse(req.body))));
   app.put('/api/settings', (req, res) => {
@@ -164,13 +208,29 @@ export function createApp(store = new Store()) {
   });
   app.get('/api/topics/:topic/questions', (req, res) => res.json(listQuestions(store, req.params.topic)));
   app.get('/api/question-bank', (req, res) => res.json(questionBank(store, id.optional().parse(req.query.trailId))));
+  app.get('/api/questions/catalog', (req, res) => res.json(questionCatalog(store, req.query.proofs === '1')));
+  app.post('/api/questions/search', (req, res) => res.json(searchQuestions(store, searchQuestionsInput.parse(req.body))));
+  app.get('/api/questions/review', (_req, res) => {
+    const state = studyState(store);
+    const editions = new Set(state.trails.filter(trail => trail.enabled !== false).map(trail => trail.editionId));
+    const topics = [...new Set(state.topics.filter(topic => topic.syllabus && editions.has(topic.editionId))
+      .flatMap(topic => relatedTopics(state, topic)))];
+    const gran = granQuestionsForTopics(store, topics).map(question => ({ ...question, prompt: '', context: '', options: [] }));
+    res.json([...questionBank(store).questions, ...gran]);
+  });
+  app.get('/api/questions/:question', (req, res) => {
+    const id = req.params.question;
+    const saved = isGranQuestion(id) ? findLocalGranQuestion(store, id) : undefined;
+    res.json(required(saved?.question, 'Questão inexistente.'));
+  });
   app.post('/api/questions/:question/answer', (req, res) =>
     res.json(answerQuestion(store, req.params.question, attemptInput.parse(req.body))));
   app.patch('/api/attempts/:attempt', (req, res) => {
     const body = z.object({ reason: note, guess: z.boolean().optional() }).parse(req.body);
-    required(store.get('SELECT 1 FROM attempts WHERE id=?', req.params.attempt), 'Tentativa inexistente.');
-    store.run('UPDATE attempts SET reason=?,guess=coalesce(?,guess) WHERE id=?',
-      body.reason, body.guess === undefined ? null : Number(body.guess), req.params.attempt);
+    const guess = body.guess === undefined ? null : Number(body.guess);
+    const result = store.run('UPDATE attempts SET reason=?,guess=coalesce(?,guess) WHERE id=?', body.reason, guess, req.params.attempt);
+    if (!result.changes && !store.run('UPDATE gran_attempts SET reason=?,guess=coalesce(?,guess) WHERE id=?',
+      body.reason, guess, req.params.attempt).changes) throw new Problem('Tentativa inexistente.', 404);
     res.json(studyState(store));
   });
   app.post('/api/cards', (req, res) => res.status(201).json(saveCard(store, cardInput.parse(req.body))));
@@ -179,7 +239,7 @@ export function createApp(store = new Store()) {
     res.json(saveCard(store, cardInput.parse(req.body), req.params.card));
   });
   app.delete('/api/cards/:card', (req, res) => {
-    removeItem(store, 'card', req.params.card);
+    remove([{ kind: 'card', id: req.params.card }]);
     res.json(studyState(store));
   });
   app.post('/api/cards/:card/review', (req, res) => {
@@ -229,7 +289,7 @@ export function createApp(store = new Store()) {
   });
 
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Operação inexistente.' }));
-  app.use(express.static(resolve('dist')));
+  app.use(express.static(staticDirectory));
   app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     if (error instanceof Problem) { res.status(error.status).json({ error: error.message }); return; }
     if (error instanceof ZodError) {

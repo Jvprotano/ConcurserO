@@ -2,10 +2,13 @@ import { useEffect, useState } from 'react';
 import { ArrowRight, CalendarDays, ChevronLeft, ChevronRight, Clock3, FileText } from 'lucide-react';
 import { activityLabels, addDays, agenda, agendaTopic, ratingLabels, sessionMinutes } from '../shared/agenda.ts';
 import type { Activity, AgendaDay, RecallRating, StudyPdf } from '../shared/agenda.ts';
+import { summaryChangesChannel, type Summary } from '../shared/summaries.ts';
 import type { Card, Question, StudyState, Topic } from '../shared/types.ts';
 import { api, formatDate, message } from './api.ts';
 import { Empty, SourceLink } from './common.tsx';
 import { QuestionAnswer, type SharedProps } from './study.tsx';
+import { RemoveButton, useBatchRemoval } from './removal.tsx';
+import { StudyTimeControls } from './study-time.tsx';
 
 const weekday = (day: string) => new Date(day + 'T12:00:00Z').getUTCDay();
 const weekStart = (day: string) => addDays(day, -((weekday(day) + 6) % 7));
@@ -24,26 +27,36 @@ function ActivityRow({ item, today, current, start }: { item: Activity; today: s
   </article>;
 }
 
-function DayActivities({ row, state, start }: { row: AgendaDay; state: StudyState; start: (item: Activity) => void }) {
+function DayActivities({ row, state, start, mutate }: {
+  row: AgendaDay; state: StudyState; start: (item: Activity) => void; mutate: SharedProps['mutate'];
+}) {
   const current = row.day === state.today;
+  const targets = new Map(row.completed.filter(item => item.kind === 'time').map(item => [item.id, {
+    kind: 'study-time' as const, id: item.id, title: item.title + ' · ' + item.minutes + ' min',
+  }]));
+  const batch = useBatchRemoval([...targets.values()], mutate);
   return <>
     {row.study.map(item => <ActivityRow key={item.id} item={item} today={state.today} current={current} start={() => start(item)}/>)}
     {row.completed.length > 0 && <details className="agenda-history" open={!current}>
-      <summary>Concluídas · {row.completed.length} · {row.spent} min</summary>
-      {row.completed.map(item => <article className="task-row" key={item.id}><div>
+      <summary>Histórico · {row.completed.length} · {row.spent} min</summary>
+      {batch.toolbar}
+      {row.completed.map(item => { const target = targets.get(item.id); return <article className="task-row" key={item.id}>
+        {target && batch.checkbox(target)}<div>
         <h3>{item.title}</h3><p>{activityLabels[item.kind]} · {item.minutes} min {item.estimated ? 'estimados' : 'registrados'}
           {item.rating && ' · ' + ratingLabels[item.rating]}</p>
         {item.materialTitle && <p>{item.materialTitle}</p>}
         {item.nextDue && <p>Próxima revisão em {formatDate(item.nextDue)}</p>}
         {item.essay && <details><summary>Ver resposta discursiva</summary><p className="prose">{item.essay}</p></details>}
-      </div></article>)}
+      </div>{target && !batch.selecting && <RemoveButton {...target} mutate={mutate}/>}</article>; })}
     </details>}
     {!row.study.length && !row.completed.length && <Empty>{row.day < state.today ? 'Nenhuma sessão registrada.' :
       row.budget === 0 ? 'Sem tempo de estudo previsto.' : 'Nenhuma atividade prevista para este dia.'}</Empty>}
   </>;
 }
 
-export function StudyAgenda({ state, start, settings }: { state: StudyState; start: (item: Activity) => void; settings: () => void }) {
+export function StudyAgenda({ state, mutate, start, settings }: {
+  state: StudyState; mutate: SharedProps['mutate']; start: (item: Activity) => void; settings: () => void;
+}) {
   const [weekly, setWeekly] = useState(false);
   const [selectedDay, setSelectedDay] = useState<string>();
   const base = weekStart(state.today);
@@ -72,6 +85,7 @@ export function StudyAgenda({ state, start, settings }: { state: StudyState; sta
           <CalendarDays size={16}/>{weekly ? 'Voltar para hoje' : 'Ver semana'}</button>
         <button type="button" className="text-button" onClick={settings}>Editar disponibilidade</button>
       </div></div>
+      <StudyTimeControls state={state} mutate={mutate}/>
       {pending > 0 && <p className="callout">{pending} {pending === 1 ? 'revisão continua pendente' : 'revisões continuam pendentes'}.
         {firstLater ? ' A próxima cabe em ' + dayLabel(firstLater.day) + '.' : ' Ajuste sua disponibilidade para encaixá-las.'}</p>}
       {overflow.length > 0 && <details className="agenda-history"><summary>Revisões que ficaram fora do tempo de hoje</summary>
@@ -92,8 +106,8 @@ export function StudyAgenda({ state, start, settings }: { state: StudyState; sta
             <small>{row.day < state.today ? row.spent + ' min feitos' : row.study.reduce((minutes, item) => minutes + item.minutes, 0) + ' / ' + row.budget + ' min'}</small>
           </button>)}
         </div>
-        <DayActivities row={selected} state={state} start={start}/>
-      </> : <DayActivities row={today} state={state} start={start}/>}
+        <DayActivities key={selected.day} row={selected} state={state} start={start} mutate={mutate}/>
+      </> : <DayActivities row={today} state={state} start={start} mutate={mutate}/>}
     </section>
   </>;
 }
@@ -103,6 +117,44 @@ export function topicActivity(state: StudyState, topic: Topic): Activity {
   const essay = /^prova discursiva$|^redação discursiva$/i.test(topic.title);
   const kind = data.cycle && data.cycle.due <= state.today ? 'review' : essay ? 'essay' : 'theory';
   return { id: 'topic:' + topic.id, topic, kind, cycle: data.cycle, materials: data.materials, title: topic.title, minutes: sessionMinutes[kind] };
+}
+
+function StudySummaries({ topicId, createUrl }: { topicId: string; createUrl?: string }) {
+  const [summaries, setSummaries] = useState<Pick<Summary, 'id' | 'title'>[]>([]);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let request = 0;
+    async function refresh() {
+      const current = ++request;
+      try {
+        const result = await api<typeof summaries>('/summaries/topic/' + encodeURIComponent(topicId));
+        if (request === current) { setSummaries(result); setFailed(false); }
+      } catch {
+        if (request === current) setFailed(true);
+      }
+    }
+    void refresh();
+    const channel = new BroadcastChannel(summaryChangesChannel);
+    channel.addEventListener('message', refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      request++;
+      channel.close();
+      window.removeEventListener('focus', refresh);
+    };
+  }, [topicId]);
+
+  if (!summaries.length && !createUrl && !failed) return null;
+  return <div className="section">
+    {summaries.length > 0 && <>
+      <h3>Resumos deste assunto</h3>
+      <ul>{summaries.map(summary => <li key={summary.id}>
+        <a href={'/?' + new URLSearchParams({ resumos: '', resumo: summary.id })} target="_blank" rel="noreferrer">{summary.title}</a>
+      </li>)}</ul>
+    </>}
+    {failed && <p className="muted" role="status">Não foi possível atualizar os resumos deste assunto.</p>}
+    {createUrl && <a className="text-button" href={createUrl} target="_blank" rel="noreferrer">Criar resumo deste assunto</a>}
+  </div>;
 }
 
 export function SessionScreen({ item, state, mutate, close, acervo }: {
@@ -124,6 +176,7 @@ export function SessionScreen({ item, state, mutate, close, acervo }: {
   const [recall, setRecall] = useState('');
   const [revealed, setRevealed] = useState(false);
   const [minutes, setMinutes] = useState('');
+  const timer = state.agenda?.timer?.topicId === topic.id ? state.agenda.timer : undefined;
   const { materials, ids } = agendaTopic(state, topic);
   const readings = materials.filter(pdf => pdf.category === 'apostila' && pdf.available);
   const [selectedPdf, setSelectedPdf] = useState('');
@@ -161,7 +214,7 @@ export function SessionScreen({ item, state, mutate, close, acervo }: {
     let nextDue: string | undefined;
     const ok = await mutate(async () => {
       const result = await api<{ nextDue?: string }>('/study-sessions/' + topic.id, 'POST', {
-        id: requestId, kind, minutes: minutes === '' ? undefined : Number(minutes),
+        id: requestId, kind, timerId: timer?.id, minutes: timer || minutes === '' ? undefined : Number(minutes),
         materialId: !questionMode || kind === 'review' ? pdf?.id : undefined,
         cycleTopicId: item.cycle?.topicId, cycleRevision: item.cycle?.revision, rating: kind === 'review' ? rating : undefined,
         attemptId: questionMode ? attemptId : undefined, cardReviewId,
@@ -176,6 +229,7 @@ export function SessionScreen({ item, state, mutate, close, acervo }: {
   return <section className="panel study-session">
     <div className="section-heading"><div><p className="eyebrow">{activityLabels[kind]}</p><h2>{topic.title}</h2></div>
       <button type="button" className="button secondary" onClick={close}>Voltar</button></div>
+    <StudyTimeControls state={state} mutate={mutate} topic={topic}/>
     {kind !== 'review' && <div className="actions">
       {kind === 'theory' && options && options.questions.length > 0 && <button className="text-button" onClick={() => setKind('questions')}>Praticar com questões</button>}
       {kind === 'theory' && options && options.questions.length === 0 && state.imports.some(job =>
@@ -188,6 +242,7 @@ export function SessionScreen({ item, state, mutate, close, acervo }: {
       <button className="text-button" disabled={busy} aria-pressed={method === 'question'} onClick={() => setMethod('question')}>Questão de prova</button>
     </div>}
     {questionMode && (question ? <div className="section" key={question.id}>
+      {question.gran && <p className="meta">Gran Questões · Q{question.gran.id}</p>}
       <QuestionAnswer question={question} changed={async () => {}} onBusy={setBusy} onAnswered={attempt => setAttemptId(attempt.id)}/>
       {!attemptId && (options?.questions.length ?? 0) > questionIndex + 1 && <button className="text-button" disabled={busy} onClick={() => setQuestionIndex(questionIndex + 1)}>Outra questão</button>}
     </div> : options && <Empty>Nenhuma questão corrigível para este assunto.</Empty>)}
@@ -212,10 +267,10 @@ export function SessionScreen({ item, state, mutate, close, acervo }: {
       {pdf && <article className="task-row"><span className="icon-tile"><FileText size={18}/></span><div><h3>{pdf.title}</h3>
         <p>{link?.section}{link?.firstPage ? ' · p. ' + link.firstPage + (link.lastPage ? '–' + link.lastPage : '') : ''}</p></div>
         <a className="button secondary" href={studyPdfUrl(pdf.id, link?.firstPage)} target="_blank" rel="noreferrer">Abrir apostila</a></article>}
-      {kind === 'theory' && <a className="text-button" href={'/?' + new URLSearchParams({
+      <StudySummaries key={topic.id} topicId={topic.id} createUrl={kind === 'theory' ? '/?' + new URLSearchParams({
         resumos: '', novo: '', topico: topic.id, ...(pdf ? { apostila: pdf.id } : {}),
         ...(link?.firstPage ? { pagina: String(link.firstPage) } : {}),
-      })} target="_blank" rel="noreferrer">Criar resumo deste assunto</a>}
+      }) : undefined}/>
       {materials.some(row => row.category !== 'apostila' && row.available) && <details className="section"><summary>Notas e fontes</summary>
         <ul>{materials.filter(row => row.category !== 'apostila' && row.available).map(row =>
           <li key={row.id}><a href={studyPdfUrl(row.id)} target="_blank" rel="noreferrer">{row.title}</a></li>)}</ul>
@@ -245,9 +300,9 @@ export function SessionScreen({ item, state, mutate, close, acervo }: {
     </fieldset>}
     {error && <p className="alert" role="alert">{error}</p>}
     <form className="section" onSubmit={event => { event.preventDefault(); void save(); }}>
-      <details><summary>Tempo da sessão · {minutes || sessionMinutes[kind]} min {minutes ? 'registrados' : 'estimados'}</summary>
-        <label>Minutos estudados <input type="number" min={1} max={600} value={minutes} onChange={event => setMinutes(event.target.value)}/></label></details>
-      <button className="button primary" disabled={busy || !canFinish}>Concluir {kind === 'review' ? 'revisão' : 'sessão'}</button>
+      {!timer && <details><summary>Tempo da sessão · {minutes || sessionMinutes[kind]} min {minutes ? 'registrados' : 'estimados'}</summary>
+        <label>Minutos estudados <input type="number" min={1} max={600} value={minutes} onChange={event => setMinutes(event.target.value)}/></label></details>}
+      <button className="button primary" disabled={busy || !canFinish}>Concluir {kind === 'review' ? 'revisão' : 'sessão'}{timer && ' e salvar tempo'}</button>
     </form>
   </section>;
 }

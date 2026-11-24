@@ -5,34 +5,63 @@ import { itemNumbers, type Subject } from '../shared/overview.ts';
 import { FileText, Plus, Upload } from 'lucide-react';
 import { api, message, pdfUrl } from './api.ts';
 import { Empty, SourceLink } from './common.tsx';
-import { RemoveButton, RemovedItems } from './removal.tsx';
-import { Materials } from './materials.tsx';
+import { RemoveButton, RemovedItems, useBatchRemoval } from './removal.tsx';
+import { MaterialLinks, materialLabels, importMaterials, normalized } from './materials.tsx';
+import { studyPdfUrl } from './agenda.tsx';
 import type { SharedProps } from './study.tsx';
 import type { DraftKey, DraftQuestion, DraftTopic, ImportJob, ImportKind, ImportSummary, PageText, Topic } from '../shared/types.ts';
 
 type Draft = { topics: DraftTopic[]; questions: DraftQuestion[]; keys: DraftKey[] };
 type Detail = { job: ImportJob; pages: PageText[]; draft: Draft; availability?: ImportSummary; preliminary?: boolean };
 const labels = { edital: 'Edital', prova: 'Caderno de prova', gabarito: 'Gabarito' };
+const documentLabels = { ...labels, ...materialLabels };
+type DocumentKind = keyof typeof documentLabels;
 const status = { queued: 'Na fila', processing: 'Processando', review: 'Importado', done: 'Salvo', failed: 'Falhou', cancelled: 'Cancelado' };
 const versions = (trail: string) => trail === 'pr' ? ['A', 'B', 'C'] : ['Única'];
 const blockFor = (trail: string, n: number) => n <= (trail === 'pr' ? 40 : 50) ? 'basico' : 'especifico';
 const maxNumber = (trail: string) => trail === 'pr' ? 80 : trail === 'pf' ? 120 : 9999;
 
-export function Acervo({ state, trail, mutate, initialJobId, initialKind = 'prova', initialEditionId, openDocument }: SharedProps & {
+export function Acervo({ state, trail, mutate, initialJobId, initialKind = 'prova', initialEditionId, openDocument }: Pick<SharedProps, 'state' | 'mutate'> & {
+  trail?: SharedProps['trail'];
   initialJobId?: string; initialKind?: ImportKind; initialEditionId?: string; openDocument: (job: ImportJob) => void;
 }) {
   const [jobId, setJobId] = useState<string | undefined>(initialJobId);
-  const [kind, setKind] = useState<ImportKind>(initialKind);
+  const [kind, setKind] = useState<DocumentKind>(trail ? initialKind : 'apostila');
   const [busy, setBusy] = useState(false);
   const [loadingPack, setLoadingPack] = useState<string>();
+  const [result, setResult] = useState('');
+  const [query, setQuery] = useState('');
+  const [onlyUnlinked, setOnlyUnlinked] = useState(false);
   const jobs = state.imports;
+  const pdfs = state.agenda?.materials ?? [];
+  const materialTopics = state.topics.filter(topic => topic.syllabus && topic.trailId === trail?.id);
+  const search = normalized(query);
+  const visibleJobs = onlyUnlinked ? [] : jobs.filter(job => normalized(job.name).includes(search));
+  const visiblePdfs = pdfs.filter(pdf => (!onlyUnlinked || !pdf.links.length) &&
+    normalized(pdf.title + ' ' + pdf.origin).includes(search));
+  const documents = [
+    ...visibleJobs.map(job => ({
+      kind: 'import' as const, id: job.id, title: job.name,
+      meta: [labels[job.kind], status[job.status], state.trails.find(row => row.id === job.trailId)?.title].filter(Boolean).join(' · '),
+      open: <button className="button secondary" onClick={() => { setJobId(job.id); openDocument(job); }}>Abrir</button>,
+      notes: null,
+    })),
+    ...visiblePdfs.map(pdf => ({
+      kind: 'material' as const, id: pdf.id, title: pdf.title,
+      meta: [materialLabels[pdf.category], pdf.origin, 'Versão ' + pdf.version,
+        pdf.available ? (pdf.links.length ? pdf.links.length + ' vínculo(s)' : 'Sem vínculo') : 'Arquivo indisponível'].join(' · '),
+      open: pdf.available && <a className="button secondary" href={studyPdfUrl(pdf.id)} target="_blank" rel="noreferrer">Abrir PDF</a>,
+      notes: materialTopics.length > 0 && <details><summary>Vínculos com o edital</summary><MaterialLinks pdf={pdf} topics={materialTopics} mutate={mutate}/></details>,
+    })),
+  ];
+  const batch = useBatchRemoval(documents, mutate);
+  const materialKind = kind === 'apostila' || kind === 'nota' || kind === 'referencia';
   const owner = state.trails.find(row => row.id === jobs.find(job => job.id === jobId)?.trailId) ?? trail;
-  if (jobId) return <ReviewImport key={jobId} jobId={jobId} jobs={jobs.filter(job => job.trailId === owner.id)} state={state} trail={owner} mutate={mutate}
+  if (jobId && owner) return <ReviewImport key={jobId} jobId={jobId} jobs={jobs.filter(job => job.trailId === owner.id)} state={state} trail={owner} mutate={mutate}
     initialEditionId={initialEditionId}
     open={setJobId} close={() => setJobId(undefined)} importKey={() => { setJobId(undefined); setKind('gabarito'); }}/>;
   return <>
-    <Materials state={state} trail={trail} mutate={mutate}/>
-    <details className="panel upload-panel"><summary>Baixar provas disponíveis</summary>
+    {trail && (trail.id === 'pr' || examPacks.some(pack => pack.trailId === trail.id)) && <details className="panel upload-panel"><summary>Baixar provas disponíveis</summary>
       {examPacks.filter(pack => pack.trailId === trail.id).map(pack => {
         const proof = jobs.find(job => job.kind === 'prova' && job.pair === pack.id + ':especifico');
         const ready = pack.blocks.every(block => (['prova', 'gabarito'] as const).every(kind =>
@@ -57,39 +86,69 @@ export function Acervo({ state, trail, mutate, initialJobId, initialKind = 'prov
         <a href="https://concursos-adm-sigcp.ibfc.org.br/informacoes/449/" target="_blank" rel="noreferrer">IBFC · Paraná 2024 · Área 3</a>:
         importe o gabarito preliminar ou pós-recurso da Área 3, na versão correspondente ao caderno.
       </p>}
-    </details>
+    </details>}
     <form className="panel upload-panel" onSubmit={async event => {
       event.preventDefault();
       const form = event.currentTarget;
-      const file = new FormData(form).get('file');
-      if (!(file instanceof File) || !file.size || busy || loadingPack) return;
+      const data = new FormData(form);
+      const files = data.getAll('file').filter((file): file is File => file instanceof File && file.size > 0);
+      if (!files.length || busy || loadingPack) return;
       setBusy(true);
-      const ok = await mutate(async () => {
-        const result = await api<{ id: string }>('/imports/' + trail.id + '/' + kind + '?name=' + encodeURIComponent(file.name), 'POST', file);
-        setJobId(result.id);
-      }, 'PDF recebido.');
-      if (ok) form.reset();
-      setBusy(false);
+      setResult('');
+      try {
+        if (materialKind) {
+          await mutate(async () => {
+            const outcome = await importMaterials(files, kind, String(data.get('origin') || '').trim(),
+              materialTopics.filter(topic => topic.editionId === trail?.editionId));
+            setResult(outcome.feedback);
+            if (!outcome.failed) form.reset();
+          });
+        } else if (trail) {
+          const file = files[0];
+          const ok = await mutate(async () => {
+            const saved = await api<{ id: string }>('/imports/' + trail.id + '/' + kind + '?name=' + encodeURIComponent(file.name), 'POST', file);
+            setJobId(saved.id);
+          }, 'PDF recebido.');
+          if (ok) form.reset();
+        }
+      } finally { setBusy(false); }
     }}>
       <h2><Upload size={20}/> Importar PDF</h2>
       <p className="muted">{kind === 'edital' ? 'O edital define os assuntos do seu plano. Depois de importar, clique em Salvar tópicos.' :
         kind === 'prova' ? 'As questões aparecerão na lista e nas análises. Com o gabarito, salve todas para responder.' :
-        'O gabarito permite corrigir suas respostas. Depois de importar, abra o caderno e salve as questões.'}</p>
-      <div className="form-grid">
-        <label>Tipo de documento <select value={kind} onChange={event => setKind(event.target.value as ImportKind)}>
-          {Object.entries(labels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        kind === 'gabarito' ? 'O gabarito permite corrigir suas respostas. Depois de importar, abra o caderno e salve as questões.' :
+        trail ? 'Depois de importar, você pode vincular o material aos assuntos do edital.' :
+        'Cadastre um concurso para importar edital, caderno de prova ou gabarito.'}</p>
+      <fieldset className="form-grid" disabled={busy}>
+        <label>Tipo de documento <select value={kind} onChange={event => { setKind(event.target.value as DocumentKind); setResult(''); }}>
+          {Object.entries(trail ? documentLabels : materialLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select></label>
-        <label>Arquivo PDF <input name="file" type="file" accept="application/pdf,.pdf" required/></label>
-      </div>
+        <label>{materialKind ? 'Arquivos PDF' : 'Arquivo PDF'} <input key={String(materialKind)}
+          name="file" type="file" accept="application/pdf,.pdf" multiple={materialKind} required/></label>
+      </fieldset>
+      {materialKind && <details><summary>Informar origem</summary><label>Origem <input name="origin" maxLength={1000} disabled={busy}/></label></details>}
       <button className="button primary" disabled={busy || !!loadingPack}>{busy ? 'Enviando…' : 'Importar PDF'}</button>
+      {result && <p className="prose" role="status">{result}</p>}
     </form>
-    <section className="section"><h2>Seus documentos</h2>
-      {!jobs.length && <Empty>Os PDFs importados aparecerão aqui.</Empty>}
-      {jobs.map(job => <article className="task-row" key={job.id}>
-        <span className="icon-tile"><FileText size={19}/></span><div><h3>{job.name}</h3><p>{labels[job.kind]} · {status[job.status]} · {state.trails.find(row => row.id === job.trailId)?.title}</p></div>
-        <button className="button secondary" onClick={() => { setJobId(job.id); openDocument(job); }}>Abrir</button>
-        <RemoveButton kind="import" id={job.id} title={job.name} mutate={mutate}/>
-      </article>)}
+    <section className="section">
+      <div className="section-heading wrap"><h2>Seus documentos</h2>{batch.toolbar}</div>
+      {!!(jobs.length + pdfs.length) && <div className="toolbar wrap">
+        <label>Buscar documento <input type="search" value={query} onChange={event => { batch.close(); setQuery(event.target.value); }}/></label>
+        {(pdfs.length > 0 || onlyUnlinked) && <label className="check"><input type="checkbox" checked={onlyUnlinked}
+          onChange={event => { batch.close(); setOnlyUnlinked(event.target.checked); }}/> Materiais sem vínculo</label>}
+      </div>}
+      {!documents.length && <Empty>{query || onlyUnlinked ? 'Nenhum documento encontrado.' : 'Os PDFs importados aparecerão aqui.'}</Empty>}
+      {documents.map(item => <div className="document-row" key={item.kind + ':' + item.id}>
+        <article className="task-row">
+          {batch.checkbox(item)}
+          <span className="icon-tile"><FileText size={19}/></span>
+          <div><h3>{item.title}</h3><p>{item.meta}</p></div>
+          {!batch.selecting && <div className="actions">{item.open}
+            <RemoveButton kind={item.kind} id={item.id} title={item.title} mutate={mutate}/>
+          </div>}
+        </article>
+        {!batch.selecting && item.notes}
+      </div>)}
     </section>
     <RemovedItems mutate={mutate} refreshKey={state}/>
   </>;

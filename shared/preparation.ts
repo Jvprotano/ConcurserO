@@ -1,12 +1,25 @@
-import { normalizeDisciplineName } from './contest-taxonomy.ts';
+import { contestDisciplines, normalizeDisciplineName } from './contest-taxonomy.ts';
 import type { ContentPath, StudyState, Topic } from './types.ts';
 
 const normalize = (value: string) => value.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLocaleLowerCase('pt-BR')
   .replace(/\s+/g, ' ').trim();
 
+const normalizeTopic = (title: string) => {
+  const value = normalize(title);
+  return value === 'interpretacao de texto' ? 'interpretacao de textos' : value;
+};
+const disciplines = new Set(Object.values(contestDisciplines).map(normalize));
+const legacyBlocks = new Set(['conhecimentos basicos', 'conhecimentos gerais', 'conhecimentos especificos']);
+
 export function matchesTopicContent(path: ContentPath | undefined, topic: Pick<Topic, 'discipline' | 'title'>) {
-  return Boolean(path && normalize(normalizeDisciplineName(path.discipline)) === normalize(normalizeDisciplineName(topic.discipline)) &&
-    [path.topic, path.subtopic].some(title => normalize(title) === normalize(topic.title)));
+  if (!path || !topic.title.trim()) return false;
+  const discipline = normalize(normalizeDisciplineName(path.discipline));
+  const target = normalize(normalizeDisciplineName(topic.discipline));
+  // Older editais stored the exam block in the discipline field. A named discipline is a whole-section match.
+  if (legacyBlocks.has(target)) {
+    return disciplines.has(discipline) && discipline === normalize(normalizeDisciplineName(topic.title));
+  }
+  return discipline === target && [path.topic, path.subtopic].some(title => title && normalizeTopic(title) === normalizeTopic(topic.title));
 }
 
 export function topicIdentity(topic: Topic) {

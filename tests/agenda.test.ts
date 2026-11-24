@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { agenda, reviewNext } from '../shared/agenda.ts';
-import { Store } from '../server/db.ts';
+import { agenda, reviewNext, timerElapsed } from '../shared/agenda.ts';
+import { localDate, Store } from '../server/db.ts';
 import { importStudyPdf, linkStudyPdf, recordStudySession, studyPdfPath } from '../server/agenda.ts';
 import { answerQuestion, listQuestions, studyState } from '../server/study.ts';
+import { removeItems, removedItems, restoreItem } from '../server/removal.ts';
+import { getStudyTimer, recordStudyTime, startStudyTimer, studyTimeInput, updateStudyTimer } from '../server/study-time.ts';
 import type { Topic } from '../shared/types.ts';
 
 const session = {
@@ -99,4 +102,90 @@ test('a semana carrega atrasos para a próxima disponibilidade, protege capacida
   assert.equal(agenda(state, monday, 3).calendar[2].study[0].kind, 'review');
   assert.deepEqual(reviewNext(thursday, 3, 'hard'), { stage: 3, due: '2026-11-22' });
   assert.deepEqual(reviewNext(thursday, 3, 'forgot'), { stage: 0, due: '2026-11-20' });
+}));
+
+test('cronometra o assunto mesmo após reabrir o banco e exclui o intervalo pausado', () => isolated(store => {
+  const target = { id: randomUUID(), topicId: 'pr-demo-0' };
+  const started = noon(monday);
+  const after = (minutes: number) => new Date(started.getTime() + minutes * 60_000);
+  startStudyTimer(store, target, started);
+  startStudyTimer(store, target, after(1));
+  assert.throws(() => startStudyTimer(store, { id: randomUUID(), topicId: 'pf-demo-0' }, after(1)), /já há/i);
+  updateStudyTimer(store, target.id, 'pause', after(2));
+
+  const reopened = new Store(store.directory);
+  try {
+    const paused = getStudyTimer(reopened)!;
+    assert.equal(paused.topicId, target.topicId);
+    assert.equal(paused.runningSince, null);
+    assert.equal(timerElapsed(paused, after(7).getTime()), 120_000);
+    updateStudyTimer(reopened, target.id, 'resume', after(7));
+    updateStudyTimer(reopened, target.id, 'save', after(10));
+    updateStudyTimer(reopened, target.id, 'save', after(11));
+    const agenda = studyState(reopened).agenda!;
+    assert.equal(agenda.timer, undefined);
+    assert.equal(agenda.sessions.length, 1);
+    assert.deepEqual([agenda.sessions[0].kind, agenda.sessions[0].minutes, agenda.sessions[0].day, agenda.sessions[0].estimated],
+      ['time', 5, monday, false]);
+    assert.equal(agenda.cycles.length, 0);
+
+    const discarded = { ...target, id: randomUUID() };
+    startStudyTimer(reopened, discarded, after(11));
+    updateStudyTimer(reopened, discarded.id, 'discard', after(12));
+    assert.equal(getStudyTimer(reopened), undefined);
+    assert.equal(studyState(reopened).agenda!.sessions.length, 1);
+  } finally { reopened.db.close(); }
+}));
+
+test('tempo avulso preserva o plano, admite lançamentos no mesmo dia e permite remover e restaurar', () => isolated(store => {
+  const topicId = 'pr-demo-0';
+  store.run('UPDATE topics SET syllabus=1 WHERE id=?', topicId);
+  const today = localDate();
+  const before = studyState(store);
+  const first = { id: randomUUID(), topicId, day: today, minutes: 9 };
+  const second = { ...first, id: randomUUID(), minutes: 6 };
+  const earlier = { ...first, id: randomUUID(), day: '2026-01-01' };
+  assert.equal(studyTimeInput.safeParse({ ...first, minutes: 0 }).success, false);
+  assert.equal(studyTimeInput.safeParse({ ...first, minutes: 1.5 }).success, false);
+  assert.throws(() => recordStudyTime(store, { ...first, day: '9999-01-01' }), /data anterior/);
+  for (const row of [first, first, second, earlier]) recordStudyTime(store, row);
+  const updated = studyState(store);
+  assert.equal(updated.spent - before.spent, 15);
+  assert.equal(updated.agenda!.sessions.filter(row => row.kind === 'time').length, 3);
+  assert.equal(agenda(updated, earlier.day, 1).calendar[0].spent, 9);
+  assert.deepEqual(updated.agenda!.cycles, before.agenda!.cycles);
+  assert.deepEqual(updated.topics.find(row => row.id === topicId), before.topics.find(row => row.id === topicId));
+
+  const remove = (id: string) => ({ kind: 'study-time' as const, id });
+  removeItems(store, [remove(first.id)]);
+  assert.equal(studyState(store).spent - before.spent, 6);
+  removeItems(store, [remove(second.id), remove(earlier.id)]);
+  assert.equal(studyState(store).spent, before.spent);
+  assert.equal(removedItems(store).length, 3);
+  restoreItem(store, 'study-time', first.id);
+  assert.equal(studyState(store).spent - before.spent, 9);
+}));
+
+test('a conclusão da agenda usa o cronômetro uma vez e preserva a associação com a tentativa', () => isolated(store => {
+  const topicId = 'pr-demo-0';
+  store.run('UPDATE topics SET syllabus=1 WHERE id=?', topicId);
+  const question = listQuestions(store, topicId)[0];
+  const start = noon(localDate());
+  const timerId = randomUUID();
+  startStudyTimer(store, { id: timerId, topicId }, start);
+  const attempt = answerQuestion(store, question.id, { id: randomUUID(), revision: question.revision, answer: 'A', guess: false });
+  const data = { id: randomUUID(), kind: 'questions', timerId, attemptId: attempt.id } as const;
+  const end = new Date(start.getTime() + 7 * 60_000);
+  const state = studyState(store);
+  assert.throws(() => recordStudySession(store, state, topicId, { ...data, attemptId: undefined }, end), /responda/i);
+  assert.equal(getStudyTimer(store)?.id, timerId);
+  const result = recordStudySession(store, state, topicId, data, end);
+  assert.equal(recordStudySession(store, state, topicId, data, end).nextDue, result.nextDue);
+  const updated = studyState(store);
+  assert.equal(updated.agenda!.timer, undefined);
+  assert.equal(updated.agenda!.sessions.length, 1);
+  assert.equal(updated.agenda!.sessions[0].minutes, 7);
+  assert.equal(updated.agenda!.sessions[0].estimated, false);
+  assert.equal(updated.agenda!.cycles.length, 1);
+  assert.throws(() => removeItems(store, [{ kind: 'study-time', id: data.id }]), /inexistente/i);
 }));

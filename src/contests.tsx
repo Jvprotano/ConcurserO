@@ -4,13 +4,14 @@ import { preparation } from '../shared/preparation.ts';
 import type { Topic, Trail } from '../shared/types.ts';
 import { api, formatDate } from './api.ts';
 import { Empty } from './common.tsx';
-import { RemoveButton } from './removal.tsx';
+import { RemoveButton, useBatchRemoval } from './removal.tsx';
 import type { SharedProps } from './study.tsx';
 
 type Props = Pick<SharedProps, 'state' | 'mutate'> & {
   edital: (trail: Trail) => void;
   study: (topic: Topic, mode: 'study' | 'practice') => void;
 };
+const contestTarget = (trail: Trail) => ({ kind: 'trail' as const, id: trail.id, title: trail.title });
 
 function ObjectiveFields({ trail }: { trail?: Trail }) {
   return <>
@@ -28,11 +29,12 @@ function ObjectiveFields({ trail }: { trail?: Trail }) {
 const objectiveBody = (data: FormData) => ({ title: data.get('title'), board: data.get('board'),
   examDate: data.get('examDate') || null, priority: Number(data.get('priority')) });
 
-export function ContestCards({ state, mutate, edital, study, manage = false }: Props & { manage?: boolean }) {
+export function ContestCards({ state, mutate, edital, study, batch }: Props & { batch?: ReturnType<typeof useBatchRemoval> }) {
   const { contests } = preparation(state);
   return <div className="contest-grid">{contests.map(contest => {
     const { trail, rows, attempts, due } = contest;
     return <article className="panel contest-card" key={trail.id}>
+      {batch?.checkbox(contestTarget(trail))}
       <p className="eyebrow">{trail.board || 'Banca a definir'}{trail.examDate && ' · ' + formatDate(trail.examDate)}</p>
       <h3>{trail.title}</h3><p className="meta">{trail.edition}</p>
       {rows.length ? <>
@@ -52,12 +54,12 @@ export function ContestCards({ state, mutate, edital, study, manage = false }: P
         </details>
       </> : <p className="callout">Edital pendente. Importe o edital para definir os assuntos do plano; depois, salve os tópicos no Acervo.</p>}
       <div className="actions"><button className="button secondary" onClick={() => edital(trail)}>{rows.length ? 'Ver edital' : 'Preparar edital'}</button></div>
-      {manage && <details><summary>Ajustar objetivo</summary><form onSubmit={event => {
+      {batch && !batch.selecting && <details><summary>Ajustar objetivo</summary><form onSubmit={event => {
         event.preventDefault(); void mutate(() => api('/trails/' + trail.id, 'PATCH', objectiveBody(new FormData(event.currentTarget))), 'Objetivo atualizado.');
       }}><ObjectiveFields trail={trail}/><div className="actions"><button className="button primary">Salvar</button>
         <button className="text-button" type="button" onClick={() => void mutate(() => api('/trails/' + trail.id, 'PATCH', { enabled: false }), 'Concurso pausado. Seu histórico foi preservado.')}>Pausar concurso</button>
       </div></form></details>}
-      {manage && <RemoveButton kind="trail" id={trail.id} title={trail.title} mutate={mutate}/>}
+      {batch && !batch.selecting && <RemoveButton {...contestTarget(trail)} mutate={mutate}/>}
     </article>;
   })}</div>;
 }
@@ -66,6 +68,8 @@ export function Contests(props: Props) {
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
   const paused = props.state.trails.filter(trail => trail.enabled === false);
+  const batch = useBatchRemoval(props.state.trails.filter(trail => trail.enabled !== false).map(contestTarget), props.mutate);
+  const pausedBatch = useBatchRemoval(paused.map(contestTarget), props.mutate);
   return <>
     <div className="toolbar"><button className="button primary" onClick={() => setCreating(!creating)}><Plus size={16}/> Cadastrar concurso</button></div>
     {creating && <form className="panel" onSubmit={async event => {
@@ -75,16 +79,18 @@ export function Contests(props: Props) {
     }}><h2>Novo objetivo</h2><ObjectiveFields/><div className="actions"><button className="button primary" disabled={busy}>Cadastrar</button>
       <button className="text-button" type="button" onClick={() => setCreating(false)}>Cancelar</button></div></form>}
     {!props.state.trails.some(trail => trail.enabled !== false) && <Empty>Cadastre ou retome um concurso para orientar o plano de estudo.</Empty>}
-    <ContestCards {...props} manage/>
+    {batch.toolbar}
+    <ContestCards {...props} batch={batch}/>
     <details className="panel"><summary>Como ler o progresso</summary>
       <p className="muted">A cobertura considera os assuntos cadastrados do edital ativo, com o mesmo peso. Ter trabalhado um assunto indica contato, sem garantir domínio ou que o edital foi cadastrado por completo. Leitura e prática ficam separadas; a amostra usa a última resposta por questão, com erros e chutes explícitos.</p>
       <p className="muted">O estudo é reaproveitado por disciplina e assunto idênticos ou equivalências confirmadas no edital. Um registro pode atender vários concursos; o tempo e o histórico são contabilizados uma vez. Questões de outra banca são treino relacionado, sem estimar a nota na prova de destino.</p>
     </details>
-    {paused.length > 0 && <details className="panel"><summary>Concursos pausados · {paused.length}</summary>{paused.map(trail =>
-      <div className="task-row" key={trail.id}><div><h3>{trail.title}</h3><p>Conteúdo e histórico preservados</p></div>
+    {paused.length > 0 && <details className="panel"><summary>Concursos pausados · {paused.length}</summary>{pausedBatch.toolbar}{paused.map(trail =>
+      <div className="task-row" key={trail.id}>{pausedBatch.checkbox(contestTarget(trail))}<div><h3>{trail.title}</h3><p>Conteúdo e histórico preservados</p></div>
+        {!pausedBatch.selecting && <>
         <button className="button secondary" onClick={() => void props.mutate(() => api('/trails/' + trail.id, 'PATCH', { enabled: true }), 'Concurso retomado.')}>Retomar</button>
         <button className="text-button" onClick={() => props.edital(trail)}>Ver edital</button>
-        <RemoveButton kind="trail" id={trail.id} title={trail.title} mutate={props.mutate}/>
+        <RemoveButton {...contestTarget(trail)} mutate={props.mutate}/></>}
       </div>)}</details>}
   </>;
 }

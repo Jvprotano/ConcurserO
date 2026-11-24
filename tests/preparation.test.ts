@@ -159,6 +159,7 @@ test('migration from v3 preserves events, revisions, cards and material and dist
     f.store.db.exec(`DROP VIEW current_questions;
       ${['cards', 'topics', 'imports', 'editions', 'trails', 'materials'].map(name => 'DROP VIEW active_' + name + ';').join('\n')}
       DROP TABLE study_sessions; DROP TABLE study_cycles; DROP TABLE study_pdf_links; DROP TABLE study_pdfs;
+      ALTER TABLE cards DROP COLUMN gran_attempt_id; DROP TABLE gran_attempts; DROP TABLE gran_saved_questions;
       DROP TABLE summaries; DELETE FROM settings WHERE key='summaryBackup';
       DROP TABLE removed_items;
       CREATE VIEW current_questions AS SELECT q.*,r.* FROM questions q JOIN question_revisions r ON r.question_id=q.id

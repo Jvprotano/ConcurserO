@@ -201,10 +201,11 @@ test('v5 migration preserves saved questions and attempts and records preliminar
     const view = f.store.get<{ sql: string }>("SELECT sql FROM sqlite_master WHERE name='current_questions'")!.sql;
     f.store.db.exec("DROP TABLE summaries; DELETE FROM settings WHERE key='summaryBackup'; " +
       'DROP TABLE study_sessions; DROP TABLE study_cycles; DROP TABLE study_pdf_links; DROP TABLE study_pdfs; ' +
+      'ALTER TABLE cards DROP COLUMN gran_attempt_id; DROP TABLE gran_attempts; DROP TABLE gran_saved_questions; ' +
       'DROP VIEW current_questions; ' + view.replace(',r.key_preliminary', '') + '; ALTER TABLE question_revisions DROP COLUMN key_preliminary; PRAGMA user_version=5;');
     const migrated = new Store(f.directory);
     try {
-      assert.equal(migrated.get<{ user_version: number }>('PRAGMA user_version')?.user_version, 8);
+      assert.equal(migrated.get<{ user_version: number }>('PRAGMA user_version')?.user_version, 10);
       assert.deepEqual(studyState(migrated).attempts, before.attempts);
       assert.deepEqual(studyState(migrated).cards, before.cards);
       migrated.run("INSERT INTO pages (import_id,page,text,needs_ocr) VALUES ('key',1,'GABARITO PRELIMINAR',0)");

@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { agendaState } from './agenda.ts';
 import { importedQuestions, importJobs } from './catalog.ts';
 import { analyzeQuestion } from './question-analysis.ts';
+import { granAttempt, granAttempts, granQuestionsForTopics, isGranQuestion, localGranQuestions, recordGranAttempt } from './local-gran.ts';
+import { questionContent } from '../shared/questions.ts';
 import { z } from 'zod';
 import { Problem, Store, localDate, nextDate, required } from './db.ts';
 import type { Attempt, BankQuestion, Card, ContentPath, ImportJob, Question, QuestionBank, StudyState, Topic, Trail } from '../shared/types.ts';
@@ -23,7 +25,7 @@ export const cardInput = z.object({
   topicIds: z.array(id).min(1).max(50), front: short,
   back: note.min(1), attemptId: id.optional(),
 });
-export const attemptInput = z.object({ id, revision: z.number().int().positive(), answer: short, guess: z.boolean() });
+export const attemptInput = z.object({ id, revision: z.number().int().positive(), answer: short, guess: z.boolean(), topicId: id.optional() });
 
 const source = (id: string | null, page: number | null) => id && page ? { id, page } : undefined;
 
@@ -48,13 +50,16 @@ const toAttempt = (row: AttemptRow): Attempt => ({
 });
 
 export function listQuestions(store: Store, topicId: string): Question[] {
-  return store.all<QuestionRow>("SELECT * FROM current_questions WHERE topic_id=? AND status!='pending' ORDER BY exam,block,version,number", topicId)
+  const local = store.all<QuestionRow>("SELECT * FROM current_questions WHERE topic_id=? AND status!='pending' ORDER BY exam,block,version,number", topicId)
     .map(row => ({
       id: row.id, revision: row.revision, topicId: row.topic_id, number: row.number,
       block: row.block, version: row.version, prompt: row.prompt, context: row.context,
       options: JSON.parse(row.options), type: row.type, status: row.status, supportPages: JSON.parse(row.support),
       exam: row.exam, source: source(row.source_id, row.source_page), keyPreliminary: Boolean(row.key_preliminary),
     }));
+  const topic = store.get<Topic>('SELECT id,discipline,title FROM active_topics WHERE id=?', topicId);
+  const gran = topic ? granQuestionsForTopics(store, [topic]) : [];
+  return [...local, ...gran.map(question => ({ ...question, status: 'ready' as const, topicId }))];
 }
 
 export function questionBank(store: Store, trailId?: string): QuestionBank {
@@ -101,8 +106,11 @@ export function studyState(store: Store): StudyState {
     source_id: string | null; source_page: number | null; practiced: number;
   }>(`SELECT p.id,e.trail_id AS trailId,p.edition_id AS editionId,p.discipline,p.title,p.priority,p.material,p.summary,
     p.source_id,p.source_page,p.syllabus,
-    (SELECT max(a.created) FROM attempts a JOIN question_revisions r ON r.question_id=a.question_id
-      AND r.revision=a.revision WHERE r.topic_id=p.id) AS lastPractice,
+    (SELECT max(created) FROM (
+      SELECT a.created FROM attempts a JOIN question_revisions r ON r.question_id=a.question_id
+        AND r.revision=a.revision WHERE r.topic_id=p.id
+      UNION ALL SELECT a.created FROM gran_attempts a WHERE a.topic_id=p.id
+    )) AS lastPractice,
     (EXISTS(SELECT 1 FROM reading WHERE topic_id=p.id) OR EXISTS
       (SELECT 1 FROM study_sessions WHERE topic_id=p.id AND kind IN ('theory', 'essay'))) AS practiced,
     (SELECT count(*) FROM current_questions q WHERE q.topic_id=p.id AND q.status='ready') AS questionCount,
@@ -111,7 +119,7 @@ export function studyState(store: Store): StudyState {
     .map(row => ({ ...row, read: Boolean(row.practiced), syllabus: Boolean(row.syllabus),
       practiced: Boolean(row.practiced || row.lastPractice), source: source(row.source_id, row.source_page) }));
   const cards = store.all<Omit<Card, 'topicIds'> & { attempt_id?: string }>(
-    'SELECT id,front,back,due,stage,attempt_id FROM active_cards ORDER BY due,_order')
+    'SELECT id,front,back,due,stage,coalesce(attempt_id,gran_attempt_id) AS attempt_id FROM active_cards ORDER BY due,_order')
     .map(row => ({
       id: row.id, front: row.front, back: row.back, due: row.due, stage: row.stage, attemptId: row.attempt_id ?? undefined,
       topicIds: store.all<{ topic_id: string }>('SELECT topic_id FROM card_topics WHERE card_id=?', row.id).map(link => link.topic_id),
@@ -122,12 +130,11 @@ export function studyState(store: Store): StudyState {
   const attemptRows = store.all<AttemptRow>(attemptSql + ' ORDER BY a.created DESC,a.rowid DESC');
   // Reviewed classification is projected from the content, never written over personal topic links.
   const bank = topics.some(topic => topic.syllabus) || attemptRows.length ? questionBank(store).questions : [];
-  const contentPath = (question: BankQuestion): ContentPath | undefined => question.analysis &&
-    ({ discipline: question.analysis.discipline, topic: question.analysis.topic, subtopic: question.analysis.label });
-  const classified = new Map(bank.map(question => [question.id + ':' + question.revision, contentPath(question)]));
+  const classified = new Map(bank.map(question => [question.id + ':' + question.revision, questionContent(question)]));
   const coverage = new Map<string, ContentPath & { count: number }>();
-  for (const question of bank) {
-    const path = contentPath(question);
+  const granQuestions = localGranQuestions(store);
+  for (const question of [...bank, ...granQuestions]) {
+    const path = questionContent(question);
     if (!path || question.status !== 'ready') continue;
     const key = JSON.stringify(path);
     coverage.set(key, { ...path, count: (coverage.get(key)?.count ?? 0) + 1 });
@@ -144,7 +151,7 @@ export function studyState(store: Store): StudyState {
           supportPages: JSON.parse(revision.support), source: source(revision.source_id, revision.source_page), editionTitle: '' };
         const job = store.get<ImportJob & { hash: string; draft: string | null }>(
           jobsSql.replace(' FROM', ',hash,draft FROM').replace('active_imports', 'imports') + ' WHERE id=?', question.source?.id ?? '');
-        classified.set(key, contentPath({ ...question, analysis: analyzeQuestion(question, job && { ...job, draft: null }) }));
+        classified.set(key, questionContent({ ...question, analysis: analyzeQuestion(question, job && { ...job, draft: null }) }));
       }
     }
     const classification = classified.get(key);
@@ -153,7 +160,8 @@ export function studyState(store: Store): StudyState {
   return {
     activeTrail, trails, topics, cards, today, spent, schedule: store.setting('schedule'), agenda,
     topicLinks: store.all('SELECT source_id AS sourceId,target_id AS targetId FROM topic_links'),
-    practiceCoverage: [...coverage.values()], attempts, imports,
+    practiceCoverage: [...coverage.values()], localQuestionCount: granQuestions.length,
+    attempts: [...attempts, ...granAttempts(store)].sort((a, b) => b.created.localeCompare(a.created)), imports,
   };
 }
 
@@ -200,6 +208,12 @@ export function answerQuestion(store: Store, questionId: string, body: z.infer<t
       if (previous.questionId !== questionId) throw new Problem('Identificador de tentativa já utilizado.', 409);
       return toAttempt(previous);
     }
+    const saved = granAttempt(store, body.id);
+    if (saved) {
+      if (saved.questionId !== questionId) throw new Problem('Identificador de tentativa já utilizado.', 409);
+      return saved;
+    }
+    if (isGranQuestion(questionId)) return recordGranAttempt(store, questionId, body);
     const current = required(store.get<QuestionRow>('SELECT * FROM current_questions WHERE id=?', questionId), 'Questão inexistente.');
     if (current.revision !== body.revision) throw new Problem('A questão foi atualizada. Reabra antes de responder.', 409);
     if (String(current.status) === 'pending') throw new Problem('Gabarito removido. Restaure o documento para responder.', 409);
@@ -216,9 +230,11 @@ export function answerQuestion(store: Store, questionId: string, body: z.infer<t
 export function saveCard(store: Store, body: z.infer<typeof cardInput>, cardId = randomUUID() as string) {
   return store.transaction(() => {
     for (const topic of body.topicIds) required(store.get('SELECT id FROM active_topics WHERE id=?', topic), 'Tópico inexistente.');
-    if (body.attemptId) required(store.get('SELECT id FROM attempts WHERE id=?', body.attemptId), 'Tentativa inexistente.');
-    store.run(`INSERT INTO cards (id,front,back,due,stage,attempt_id) VALUES (?,?,?,?,?,?)
-      ON CONFLICT(id) DO UPDATE SET front=excluded.front,back=excluded.back`, cardId, body.front, body.back, localDate(), -1, body.attemptId ?? null);
+    const gran = body.attemptId && store.get('SELECT id FROM gran_attempts WHERE id=?', body.attemptId);
+    if (body.attemptId && !gran) required(store.get('SELECT id FROM attempts WHERE id=?', body.attemptId), 'Tentativa inexistente.');
+    store.run(`INSERT INTO cards (id,front,back,due,stage,attempt_id,gran_attempt_id) VALUES (?,?,?,?,?,?,?)
+      ON CONFLICT(id) DO UPDATE SET front=excluded.front,back=excluded.back`, cardId, body.front, body.back, localDate(), -1,
+      gran ? null : body.attemptId ?? null, gran ? body.attemptId! : null);
     store.run('DELETE FROM card_topics WHERE card_id=?', cardId);
     for (const topic of new Set(body.topicIds)) store.run('INSERT INTO card_topics VALUES (?,?)', cardId, topic);
     return { id: cardId };

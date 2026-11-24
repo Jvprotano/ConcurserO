@@ -1,3 +1,5 @@
+export const summaryChangesChannel = 'concursero-summary-changes';
+
 export interface SummaryDraft {
   title: string;
   html: string;

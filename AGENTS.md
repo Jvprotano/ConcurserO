@@ -10,3 +10,6 @@
 - Ao pedir edital, explicar em uma frase que ele define os assuntos do plano e qual é o próximo passo após importar.
 - Preservar procedência, versões e histórico; permitir correção com o gabarito preliminar da própria prova, identificado como preliminar, sem confirmação extra. Nunca aplicar gabarito de outra prova nem apresentar preliminar como definitivo. Conteúdo não corrigível continua visível com sua pendência.
 - Antes do código, atualizar especificação, plano e tarefas conforme `.specify/memory/constitution.md`.
+
+- Aplicar KISS ao código e às funcionalidades. Reutilizar componentes e fluxos existentes quando fizer sentido. Agrupar ações relacionadas e evitar criar uma nova área na tela para cada funcionalidade.
+- Conteúdo adicionado deve oferecer remoção por unidade e em lote. Usar a mesma seleção e confirmação nas coleções, preservando o histórico aplicável.

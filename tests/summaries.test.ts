@@ -51,6 +51,8 @@ test('resumos persistem, atualizam o backup e restauram sem sobrescrever', async
     assert.equal(files.length, 1);
     const path = join(folder, files[0]);
     assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')).summaries, [summary]);
+    assert.deepEqual(await (await source.request('/topic/' + draft.topicId)).json(), [{ id: summary.id, title: summary.title }]);
+    assert.deepEqual(await (await source.request('/topic/outro-topico')).json(), []);
     const exported = await source.request('/backup');
     assert.match(exported.headers.get('content-disposition') ?? '', /attachment.*\.json/);
     const original = await exported.text();
@@ -62,6 +64,7 @@ test('resumos persistem, atualizam o backup e restauram sem sobrescrever', async
     assert(updated.backup.error);
     assert.equal(updated.summary.revision, 2);
     assert.equal(updated.summary.archived, true);
+    assert.deepEqual(await (await source.request('/topic/' + draft.topicId)).json(), []);
     assert.equal((await source.request('/' + summary.id, 'PUT', summary)).status, 409);
     renameSync(offline, folder);
     const retried = await source.request('/backup', 'PUT', { directory: folder });

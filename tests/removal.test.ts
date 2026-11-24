@@ -192,3 +192,55 @@ test('HTTP removal, restoration and uploads during extraction use the same lifec
     assert.equal(studyState(f.store).trails.length, 1);
   } finally { await new Promise<void>(resolve => server.close(() => resolve())); f.close(); }
 });
+
+test('batch removal rolls back as a unit and restores PDFs with their links and summaries with their content', async () => {
+  const f = fixture(), server = createApp(f.store).listen(0, '127.0.0.1');
+  try {
+    await once(server, 'listening');
+    const address = server.address();
+    assert.ok(address && typeof address === 'object');
+    const base = 'http://127.0.0.1:' + address.port + '/api';
+    const json = (path: string, method: string, body: unknown) => fetch(base + path, {
+      method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    async function upload(name: string, category: string) {
+      const response = await fetch(base + '/study-pdfs?' + new URLSearchParams({ filename: name, category, origin: 'Teste' }), {
+        method: 'POST', headers: { 'Content-Type': 'application/pdf' }, body: '%PDF-1.4\n' + name + '\n%%EOF',
+      });
+      assert.equal(response.status, 201);
+      return response.json();
+    }
+
+    const first = await upload('Redes.pdf', 'apostila');
+    const second = await upload('Consulta.pdf', 'referencia');
+    f.store.run("UPDATE topics SET syllabus=1 WHERE id='pf-demo-0'");
+    assert.equal((await json('/study-pdfs/' + first.id + '/links', 'PUT', { topicId: 'pf-demo-0', firstPage: 3 })).status, 200);
+    const { summary } = await json('/summaries', 'POST', {
+      title: 'Redes', discipline: '', subject: '', html: '<p>Resumo</p>', topicId: null, source: null,
+    }).then(response => response.json());
+    assert.ok(summary.id);
+
+    const items = [
+      { kind: 'import', id: 'key' },
+      { kind: 'material', id: first.id },
+      { kind: 'material', id: second.id },
+      { kind: 'summary', id: summary.id },
+    ];
+    assert.equal((await json('/items/batch-remove', 'POST', { items: [...items, { kind: 'card', id: 'missing' }] })).status, 404);
+    assert.equal(removedItems(f.store).length, 0);
+    assert.equal((await json('/items/batch-remove', 'POST', { items })).status, 200);
+    assert.equal(removedItems(f.store).length, items.length);
+    assert.equal(studyState(f.store).agenda?.materials.length, 0);
+    assert.equal((await fetch(base + '/study-pdfs/' + first.id + '/pdf')).status, 404);
+    assert.equal((await fetch(base + '/imports/key')).status, 404);
+    assert.deepEqual((await fetch(base + '/summaries').then(response => response.json())).summaries, []);
+    assert.deepEqual((await fetch(base + '/summaries/backup').then(response => response.json())).summaries, []);
+
+    const restored = await upload('Redes.pdf', 'apostila');
+    assert.equal(restored.id, first.id);
+    assert.equal(restored.restored, true);
+    assert.equal(studyState(f.store).agenda?.materials[0].links[0].firstPage, 3);
+    assert.equal((await fetch(base + '/items/summary/' + summary.id + '/restore', { method: 'POST' })).status, 200);
+    assert.deepEqual((await fetch(base + '/summaries').then(response => response.json())).summaries, [summary]);
+  } finally { await new Promise<void>(resolve => server.close(() => resolve())); f.close(); }
+});

@@ -32,8 +32,10 @@ const snapshot = z.object({ format: z.literal('concursero-resumos'), version: z.
 const maxBackupBytes = 50 * 1024 * 1024;
 type Settings = SummaryBackup & { installation: string };
 
-function summaries(store: Store) {
-  return store.all<{ document: string }>('SELECT document FROM summaries').map(row => JSON.parse(row.document) as Summary)
+function summaries(store: Store, includeRemoved = false) {
+  return store.all<{ document: string }>(`SELECT document FROM summaries${includeRemoved ? '' :
+    " WHERE NOT EXISTS (SELECT 1 FROM removed_items d WHERE d.kind='summary' AND d.id=summaries.id)"}`)
+    .map(row => JSON.parse(row.document) as Summary)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
 }
 
@@ -43,7 +45,8 @@ function writeSummary(store: Store, summary: Summary) {
 }
 
 function readSummary(store: Store, id: string): Summary {
-  const row = required(store.get<{ document: string }>('SELECT document FROM summaries WHERE id=?', id), 'Resumo inexistente.');
+  const row = required(store.get<{ document: string }>(`SELECT document FROM summaries WHERE id=?
+    AND NOT EXISTS (SELECT 1 FROM removed_items d WHERE d.kind='summary' AND d.id=summaries.id)`, id), 'Resumo inexistente.');
   return JSON.parse(row.document);
 }
 
@@ -59,7 +62,7 @@ function publicBackup({ directory, savedAt, error }: Settings): SummaryBackup {
   return { directory, savedAt, error };
 }
 
-function writeBackup(store: Store) {
+export function writeBackup(store: Store) {
   const settings = backupSettings(store);
   if (!settings.directory) return publicBackup(settings);
   const now = new Date();
@@ -91,7 +94,7 @@ function restoreSummaries(store: Store, raw: Buffer) {
   const imported = parsed.data.summaries;
   if (new Set(imported.map(row => row.id)).size !== imported.length) throw new Problem('O backup tem identificadores duplicados.');
   return store.transaction(() => {
-    const existing = new Map(summaries(store).map(summary => [summary.id, summary]));
+    const existing = new Map(summaries(store, true).map(summary => [summary.id, summary]));
     let added = 0, copies = 0;
     for (const summary of imported) {
       const content = summaryContent(summary);
@@ -116,6 +119,14 @@ export function summaryRoutes(store: Store) {
   const router = express.Router();
   if (backupSettings(store).directory) writeBackup(store);
   router.get('/', (_req, res) => res.json({ summaries: summaries(store), backup: publicBackup(backupSettings(store)) }));
+  router.get('/topic/:topicId', (req, res) => {
+    const topicId = identifier.parse(req.params.topicId);
+    res.json(store.all<Pick<Summary, 'id' | 'title'>>(`
+      SELECT id, json_extract(document, '$.title') AS title FROM summaries
+      WHERE json_extract(document, '$.topicId') = ? AND json_extract(document, '$.archived') = 0
+        AND NOT EXISTS (SELECT 1 FROM removed_items d WHERE d.kind='summary' AND d.id=summaries.id)
+      ORDER BY json_extract(document, '$.updatedAt') DESC, id`, topicId));
+  });
   router.get('/backup', (_req, res) => res.type('application/octet-stream')
     .attachment(`ConcurserO-resumos-${localDate()}.json`).send(exportSummaries(store)));
   router.put('/backup', (req, res) => {

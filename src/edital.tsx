@@ -6,7 +6,9 @@ import { Empty, SourceLink, TopicLinks } from './common.tsx';
 import type { SharedProps } from './study.tsx';
 import type { Topic } from '../shared/types.ts';
 import { preparation, relatedTopics } from '../shared/preparation.ts';
-import { RemoveButton } from './removal.tsx';
+import { RemoveButton, useBatchRemoval } from './removal.tsx';
+
+const topicTarget = ({ id, title }: Topic) => ({ kind: 'topic' as const, id, title });
 
 export function Edital({ state, trail, topics, mutate, study, importPdf }: SharedProps & {
   study: (topic: Topic, mode: 'study' | 'practice') => void;
@@ -19,6 +21,12 @@ export function Edital({ state, trail, topics, mutate, study, importPdf }: Share
   const [links, setLinks] = useState<string[]>([]);
   const selected = state.topics.filter(topic => topic.editionId === edition && topic.syllabus !== false);
   const library = state.topics.filter(topic => topic.editionId === edition && topic.syllabus === false);
+  const topicBatch = useBatchRemoval([...selected, ...library].map(topicTarget), mutate,
+    removed => { if (removed.some(item => item.id === (editing && editing !== 'new' ? editing.id : undefined))) setEditing(undefined); });
+  const inactiveEditions = trail.editions.filter(item => item.id !== trail.editionId).map(item => ({ ...item, kind: 'edition' as const }));
+  const editionBatch = useBatchRemoval(inactiveEditions, mutate, removed => {
+    if (removed.some(item => item.id === edition)) { setEdition(trail.editionId); setEditing(undefined); topicBatch.close(); }
+  });
   const progress = preparation(state).progress;
   const comparing = edition !== trail.editionId;
   const key = (topic: Topic) => topic.discipline + '|' + topic.title;
@@ -33,15 +41,21 @@ export function Edital({ state, trail, topics, mutate, study, importPdf }: Share
     <details><summary>Sobre o edital de referência</summary><p className="muted">É o edital anterior usado como base da preparação.
       Tópicos marcados como demonstração são exemplos, não o conteúdo completo.</p></details>
     <div className="toolbar wrap">
-      <label>Edição do edital <select value={edition} onChange={event => { setEdition(event.target.value); setEditing(undefined); }}>
+      <label>Edição do edital <select value={edition} onChange={event => { setEdition(event.target.value); setEditing(undefined); topicBatch.close(); }}>
         {trail.editions.map(item => <option key={item.id} value={item.id}>{item.title}{item.id === trail.editionId ? ' · ativa' : ''}</option>)}
       </select></label>
       <button className="button secondary" onClick={() => setShowNewEdition(!showNewEdition)}>Nova edição</button>
       <button className="button secondary" onClick={() => importPdf(edition)}><Upload size={16}/> Importar edital</button>
       <button className="button primary" onClick={() => setEditing('new')}><Plus size={16}/> Novo tópico</button>
-      {comparing && <RemoveButton kind="edition" id={edition} title={trail.editions.find(row => row.id === edition)?.title ?? edition}
-        mutate={mutate} onRemoved={() => setEdition(trail.editionId)}/>}
     </div>
+    {inactiveEditions.length > 0 && <details className="section"><summary>Gerenciar outras edições</summary>
+      {editionBatch.toolbar}
+      {inactiveEditions.map(item => <div className="task-row" key={item.id}>
+        {editionBatch.checkbox(item)}<div><h3>{item.title}</h3></div>
+        {!editionBatch.selecting && <RemoveButton {...item} mutate={mutate}
+          onRemoved={() => { if (item.id === edition) { setEdition(trail.editionId); setEditing(undefined); topicBatch.close(); } }}/>}
+      </div>)}
+    </details>}
     {showNewEdition && <form className="panel" onSubmit={async event => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);
@@ -103,11 +117,13 @@ export function Edital({ state, trail, topics, mutate, study, importPdf }: Share
         <button className="button secondary" type="button" onClick={() => setShare(undefined)}>Cancelar</button></div>
     </form>}
     {!selected.length && <Empty>Esta edição ainda não tem tópicos. Importe um edital ou adicione os primeiros assuntos.</Empty>}
+    {topicBatch.toolbar}
     {disciplines.map(discipline => <section key={discipline} className="section">
       <div className="section-heading"><h2>{discipline}</h2></div>
       {selected.filter(topic => topic.discipline === discipline).map(topic => {
         const { cycle, last, materials } = agendaTopic(state, topic);
         return <article className="task-row topic-row" key={topic.id}>
+        {topicBatch.checkbox(topicTarget(topic))}
         <span className="icon-tile"><BookOpen size={19}/></span><div><h3>{topic.title}</h3>
           <p>{progress(topic).read ? 'Com leitura' : 'Sem leitura'} · {progress(topic).practiced ? 'Com prática' : 'Sem prática'}</p><SourceLink source={topic.source}/>
           {last && <p>Último estudo em {formatDate(last.day)}</p>}
@@ -115,17 +131,17 @@ export function Edital({ state, trail, topics, mutate, study, importPdf }: Share
           {!topic.material && !topic.summary && !topic.materialCount && !materials.length && <p>Sem material vinculado</p>}
           <TopicEquivalence topic={topic} state={state} mutate={mutate}/></div>
         <div className="actions"><button className="text-button" onClick={() => setEditing(topic)}>Editar</button>
-          <RemoveButton kind="topic" id={topic.id} title={topic.title} mutate={mutate}/>
+          {!topicBatch.selecting && <RemoveButton {...topicTarget(topic)} mutate={mutate}/>}
           {!comparing && <><button className="text-button" onClick={() => { setShare(topic); setLinks([topic.id]); }}>Compartilhar material</button>
           <button className="button secondary" onClick={() => study(topic, 'study')}>Estudar <ArrowRight size={16}/></button></>}</div>
       </article>;
       })}
     </section>)}
-    {library.length > 0 && <details className="panel"><summary>Conteúdo de apoio e demonstrações · {library.length}</summary>
+    {library.length > 0 && <details className="panel" open={topicBatch.selecting || undefined}><summary>Conteúdo de apoio e demonstrações · {library.length}</summary>
       <p className="muted">Não compõem o edital. Para incluir um assunto confirmado no edital, use Editar.</p>
-      {library.map(topic => <div className="task-row" key={topic.id}><div><h3>{topic.title}</h3><p>{topic.discipline}</p></div>
+      {library.map(topic => <div className="task-row" key={topic.id}>{topicBatch.checkbox(topicTarget(topic))}<div><h3>{topic.title}</h3><p>{topic.discipline}</p></div>
         <button className="text-button" onClick={() => setEditing(topic)}>Editar</button>
-        <RemoveButton kind="topic" id={topic.id} title={topic.title} mutate={mutate}/>
+        {!topicBatch.selecting && <RemoveButton {...topicTarget(topic)} mutate={mutate}/>}
         <button className="button secondary" onClick={() => study(topic, 'study')}>Estudar</button></div>)}
     </details>}
   </>;

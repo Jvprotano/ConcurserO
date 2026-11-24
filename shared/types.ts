@@ -1,5 +1,5 @@
 export type ImportKind = 'edital' | 'prova' | 'gabarito';
-export type RemovableKind = 'import' | 'trail' | 'edition' | 'topic' | 'material' | 'card';
+export type RemovableKind = 'import' | 'trail' | 'edition' | 'topic' | 'material' | 'card' | 'summary' | 'study-time' | 'gran-question';
 export interface RemovedItem { kind: RemovableKind; id: string; title: string; removed: string }
 export type QuestionType = 'choice' | 'boolean';
 export type ImportStatus = 'queued' | 'processing' | 'review' | 'done' | 'cancelled' | 'failed';
@@ -32,7 +32,7 @@ export interface Topic {
   materialCount: number;
   source?: { id: string; page: number };
 }
-export interface Option { key: string; text: string }
+export interface Option { key: string; text: string; label?: string }
 export interface Question {
   id: string;
   exam: string;
@@ -49,6 +49,7 @@ export interface Question {
   supportPages: number[];
   keyPreliminary?: boolean;
   source?: { id: string; page: number };
+  gran?: { id: string; discipline?: string; topic?: string; institution?: string; year?: number };
 }
 export interface Attempt {
   classification?: ContentPath;
@@ -57,6 +58,7 @@ export interface Attempt {
   topicId: string;
   prompt: string;
   answer: string;
+  answerLabel?: string;
   correct: boolean;
   guess: boolean;
   reason: string;
@@ -65,11 +67,13 @@ export interface Attempt {
   created: string;
   keySource?: { id: string; page: number };
   keyPreliminary?: boolean;
+  granId?: string;
 }
 export interface BankQuestion extends Omit<Question, 'status'> {
   trailId?: string;
   board?: string;
   analysis?: import('./theme-catalog.ts').ThemeClassification;
+  content?: ContentPath;
   status: 'ready' | 'annulled' | 'pending';
   discipline: string;
   topicTitle: string;
@@ -133,6 +137,7 @@ export interface DraftQuestion {
 export interface DraftKey { page: number; number: number; version: string; block: string; key: string }
 export interface StudyState {
   agenda?: import('./agenda.ts').AgendaState;
+  localQuestionCount?: number;
   practiceCoverage?: (ContentPath & { count: number })[];
   topicLinks?: { sourceId: string; targetId: string }[];
   trails: Trail[];

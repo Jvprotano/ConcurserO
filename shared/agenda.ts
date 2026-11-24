@@ -3,7 +3,7 @@ import type { StudyState, Topic } from './types.ts';
 
 export type SessionKind = 'theory' | 'questions' | 'review' | 'essay';
 export type RecallRating = 'forgot' | 'hard' | 'remembered';
-export const activityLabels = { theory: 'Teoria', questions: 'Questões', review: 'Revisão', essay: 'Discursiva', cards: 'Flashcards' };
+export const activityLabels = { theory: 'Teoria', questions: 'Questões', review: 'Revisão', essay: 'Discursiva', cards: 'Flashcards', time: 'Tempo de estudo' };
 export const ratingLabels = { forgot: 'Não lembrei', hard: 'Com dificuldade', remembered: 'Lembrei' };
 export const sessionMinutes: Record<SessionKind, number> = { theory: 10, questions: 5, review: 5, essay: 20 };
 
@@ -30,7 +30,7 @@ export interface StudySession {
   topicId: string;
   title: string;
   day: string;
-  kind: SessionKind | 'cards';
+  kind: SessionKind | 'cards' | 'time';
   minutes: number;
   estimated: boolean;
   rating?: RecallRating;
@@ -39,12 +39,21 @@ export interface StudySession {
   materialId?: string;
   materialTitle?: string;
   essay?: string;
+  created?: string;
 }
 export interface ReviewCycle { topicId: string; due: string; stage: number; revision: number }
+export interface StudyTimer {
+  id: string;
+  topicId: string;
+  title: string;
+  elapsedMs: number;
+  runningSince: number | null;
+}
 export interface AgendaState {
   materials: StudyPdf[];
   sessions: StudySession[];
   cycles: ReviewCycle[];
+  timer?: StudyTimer;
 }
 export interface Activity {
   id: string;
@@ -66,6 +75,10 @@ export interface AgendaDay {
 }
 
 const intervals = [1, 3, 7, 14, 30];
+export function timerElapsed(timer: StudyTimer, now: number) {
+  return timer.elapsedMs + (timer.runningSince === null ? 0 : Math.max(0, now - timer.runningSince));
+}
+
 export function addDays(day: string, days: number) {
   const date = new Date(day + 'T12:00:00Z');
   date.setUTCDate(date.getUTCDate() + days);
@@ -77,12 +90,12 @@ export function reviewNext(day: string, stage: number, rating?: RecallRating) {
   return { stage: step, due: addDays(day, rating === 'hard' ? Math.min(3, intervals[step]) : intervals[step]) };
 }
 
-export function agendaTopic(state: StudyState, topic: Topic) {
+export function agendaTopic(state: StudyState, topic: Topic, includeStudyTime = true) {
   const ids = new Set(relatedTopics(state, topic).map(row => row.id));
   const data = state.agenda;
   const cycle = data?.cycles.filter(row => ids.has(row.topicId)).sort((a, b) => a.due.localeCompare(b.due))[0];
   const materials = data?.materials.filter(row => row.links.some(link => ids.has(link.topicId))) ?? [];
-  const last = data?.sessions.find(row => ids.has(row.topicId));
+  const last = data?.sessions.find(row => ids.has(row.topicId) && (includeStudyTime || row.kind !== 'time'));
   return { cycle, materials, last, ids };
 }
 
@@ -94,7 +107,7 @@ export function agenda(state: StudyState, start: string, days: number) {
   const next: Activity[] = [];
   const seenCycles = new Set<string>();
   for (const row of candidates) {
-    const { cycle, materials, last } = agendaTopic(state, row.topic);
+    const { cycle, materials, last } = agendaTopic(state, row.topic, false);
     const title = row.topic.title;
     const readable = materials.some(pdf => pdf.category === 'apostila' && pdf.available) || row.related.some(topic =>
       topic.material || topic.summary || topic.materialCount > materials.filter(pdf => pdf.links.some(link => link.topicId === topic.id)).length);

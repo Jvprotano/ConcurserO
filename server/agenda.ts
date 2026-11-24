@@ -7,6 +7,8 @@ import type { AgendaState, MaterialLink, StudyPdf, StudySession } from '../share
 import { matchesTopicContent, relatedTopics } from '../shared/preparation.ts';
 import type { BankQuestion, StudyState } from '../shared/types.ts';
 import { localDate, Problem, required, Store } from './db.ts';
+import { consumeStudyTimer, getStudyTimer } from './study-time.ts';
+import { questionContent } from '../shared/questions.ts';
 
 export const pdfInput = z.object({
   filename: z.string().trim().min(1).max(255),
@@ -25,6 +27,7 @@ export const sessionInput = z.object({
   id: z.uuid(),
   kind: z.enum(['theory', 'questions', 'review', 'essay']),
   minutes: z.number().int().min(1).max(600).optional(),
+  timerId: z.uuid().optional(),
   materialId: z.string().min(1).max(100).optional(),
   cycleRevision: z.number().int().min(1).optional(),
   cycleTopicId: z.string().min(1).max(100).optional(),
@@ -68,7 +71,10 @@ export function importStudyPdf(store: Store, bytes: Buffer, metadata: z.infer<ty
   }
   return store.transaction(() => {
     const existing = store.get<{ id: string }>('SELECT material_id AS id FROM study_pdfs WHERE hash=?', hash);
-    if (existing) return { ...existing, duplicate: true };
+    if (existing) {
+      const restored = store.run("DELETE FROM removed_items WHERE kind='material' AND id=?", existing.id).changes > 0;
+      return restored ? { ...existing, duplicate: false, restored: true } : { ...existing, duplicate: true };
+    }
     const version = (store.get<{ latest: number }>('SELECT max(version) AS latest FROM study_pdfs WHERE filename=? AND origin=?',
       filename, metadata.origin)?.latest ?? 0) + 1;
     const id = randomUUID();
@@ -93,7 +99,7 @@ export function agendaState(store: Store): AgendaState {
   const sessions = store.all<StudySession>(`SELECT id,topic_id AS topicId,title,study_day AS day,kind,minutes,estimated,
     rating,next_due AS nextDue,old_due AS oldDue,material_id AS materialId,material_title AS materialTitle,created,
     CASE WHEN kind='essay' THEN recall END AS essay
-    FROM study_sessions
+    FROM study_sessions s WHERE NOT EXISTS (SELECT 1 FROM removed_items d WHERE d.kind='study-time' AND d.id=s.id)
     UNION ALL
     SELECT 'reading:'||r.topic_id||':'||r.study_day,r.topic_id,p.title,r.study_day,'theory',10,1,NULL,NULL,NULL,NULL,NULL,r.study_day,NULL
     FROM reading r JOIN topics p ON p.id=r.topic_id
@@ -102,16 +108,21 @@ export function agendaState(store: Store): AgendaState {
       JOIN question_revisions r ON r.question_id=a.question_id AND r.revision=a.revision JOIN topics p ON p.id=r.topic_id
       WHERE NOT EXISTS (SELECT 1 FROM study_sessions s WHERE s.attempt_id=a.id)
     UNION ALL
+    SELECT a.id,coalesce(p.id,''),coalesce(p.title,json_extract(q.document,'$.topico.nome'),
+      json_extract(q.document,'$.materia.nome'),'Questões do Gran'),a.study_day,'questions',2,1,NULL,NULL,NULL,NULL,NULL,a.created,NULL
+      FROM gran_attempts a JOIN gran_saved_questions q ON q.id=a.question_id LEFT JOIN topics p ON p.id=a.topic_id
+      WHERE NOT EXISTS (SELECT 1 FROM study_sessions s WHERE s.gran_attempt_id=a.id)
+    UNION ALL
     SELECT r.id,coalesce((SELECT topic_id FROM card_topics ct WHERE ct.card_id=c.id ORDER BY ct.topic_id LIMIT 1),''),
       c.front,r.study_day,'cards',1,1,NULL,r.new_due,r.old_due,NULL,NULL,r.created,NULL FROM reviews r JOIN cards c ON c.id=r.card_id
       WHERE NOT EXISTS (SELECT 1 FROM study_sessions s WHERE s.card_review_id=r.id)
     ORDER BY day DESC,created DESC`).map(row => ({ ...row, estimated: Boolean(row.estimated) }));
-  return { sessions, materials: listStudyPdfs(store),
+  return { sessions, materials: listStudyPdfs(store), timer: getStudyTimer(store),
     cycles: store.all('SELECT topic_id AS topicId,due,stage,revision FROM study_cycles') };
 }
 
 function compatibleQuestion(question: BankQuestion, related: StudyState['topics']) {
-  const path = question.analysis && { discipline: question.analysis.discipline, topic: question.analysis.topic, subtopic: question.analysis.label };
+  const path = questionContent(question);
   return related.some(row => row.id === question.topicId || matchesTopicContent(path, row));
 }
 
@@ -121,7 +132,8 @@ export function sessionOptions(state: StudyState, topicId: string, bank: BankQue
   const attempted = new Set(state.attempts.map(row => row.questionId));
   return {
     questions: bank.filter(row => row.status === 'ready' && compatibleQuestion(row, related))
-      .sort((a, b) => Number(attempted.has(a.id)) - Number(attempted.has(b.id))).slice(0, 12),
+      .sort((a, b) => Number(attempted.has(a.id)) - Number(attempted.has(b.id))).slice(0, 12)
+      .map(question => question.gran ? { ...question, topicId: related.find(row => matchesTopicContent(question.content, row))?.id ?? '' } : question),
     cards: state.cards.filter(card => card.due <= state.today && card.topicIds.some(id => related.some(row => row.id === id))),
   };
 }
@@ -151,8 +163,10 @@ export function recordStudySession(store: Store, state: StudyState, topicId: str
       row.links.some(link => ids.has(link.topicId))), 'Material vinculado indisponível.') : undefined;
     const attempt = body.attemptId ? required(state.attempts.find(row => row.id === body.attemptId &&
       related.some(option => option.id === row.topicId || matchesTopicContent(row.classification, option))), 'Tentativa do assunto inexistente.') : undefined;
-    if (attempt && (!store.get('SELECT 1 FROM attempts WHERE id=? AND study_day=?', attempt.id, day) ||
-      store.get('SELECT 1 FROM study_sessions WHERE attempt_id=?', attempt.id))) throw new Problem('Tentativa já registrada ou de outro dia.', 409);
+    if (attempt && (!store.get(`SELECT 1 FROM ${attempt.granId ? 'gran_attempts' : 'attempts'} WHERE id=? AND study_day=?`, attempt.id, day) ||
+      store.get(`SELECT 1 FROM study_sessions WHERE ${attempt.granId ? 'gran_attempt_id' : 'attempt_id'}=?`, attempt.id))) {
+      throw new Problem('Tentativa já registrada ou de outro dia.', 409);
+    }
     if (body.cardReviewId) {
       const reviewed = required(store.get<{ cardId: string }>('SELECT card_id AS cardId FROM reviews WHERE id=? AND study_day=?', body.cardReviewId, day), 'Revisão de cartão inexistente.');
       if (!state.cards.some(card => card.id === reviewed.cardId && card.topicIds.some(id => ids.has(id))) ||
@@ -162,11 +176,13 @@ export function recordStudySession(store: Store, state: StudyState, topicId: str
     if (body.kind === 'essay' && !body.recall) throw new Problem('Registre a resposta discursiva antes de concluir.');
     if (body.kind === 'review' && (!body.rating || (!attempt && !body.recall))) throw new Problem('Tente responder e avalie sua lembrança.');
     const next = !cycle || body.kind === 'review' ? reviewNext(day, cycle?.stage ?? 0, body.rating) : undefined;
+    const minutes = body.timerId ? consumeStudyTimer(store, body.timerId, now, topicId).minutes : body.minutes;
     store.run(`INSERT INTO study_sessions (id,topic_id,title,study_day,created,kind,minutes,estimated,rating,old_due,next_due,rule,
-      material_id,material_title,recall,attempt_id,card_review_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      body.id, topicId, topic.title, day, now.toISOString(), body.kind, body.minutes ?? sessionMinutes[body.kind], Number(body.minutes === undefined),
+      material_id,material_title,recall,attempt_id,card_review_id,gran_attempt_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      body.id, topicId, topic.title, day, now.toISOString(), body.kind, minutes ?? sessionMinutes[body.kind], Number(minutes === undefined),
       body.rating ?? null, body.kind === 'review' ? cycle?.due ?? null : null, next?.due ?? null, next ? 1 : null,
-      material?.id ?? null, material?.title ?? null, body.recall ?? null, attempt?.id ?? null, body.cardReviewId ?? null);
+      material?.id ?? null, material?.title ?? null, body.recall ?? null, attempt?.granId ? null : attempt?.id ?? null,
+      body.cardReviewId ?? null, attempt?.granId ? attempt.id : null);
     if (next) store.run(`INSERT INTO study_cycles VALUES (?,?,?,1) ON CONFLICT(topic_id) DO UPDATE SET
       due=excluded.due,stage=excluded.stage,revision=study_cycles.revision+1`, cycle?.topicId ?? topicId, next.due, next.stage);
     return { topicId, nextDue: next?.due, kind: body.kind };
